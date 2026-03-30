@@ -1,0 +1,5 @@
+// Global SCSS - variables and mixins available in all .vue files
+// This file is injected via vite.config.ts additionalData
+
+@forward './variables.scss';
+@forward './mixins.scss';

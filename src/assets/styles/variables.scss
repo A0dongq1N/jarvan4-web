@@ -1,0 +1,160 @@
+// ============================================================
+// Grafana Light 主题变量
+// 参考: github.com/grafana/grafana packages/grafana-data/src/themes/palette.ts
+// ============================================================
+
+// ── Primary（Grafana blueLightMain）──────────────────────────
+$color-primary:        #3871dc;
+$color-primary-light-1: #4d81e2;
+$color-primary-light-2: #6291e8;
+$color-primary-light-3: #77a1ee;
+$color-primary-light-4: #8cb1f3;
+$color-primary-light-5: #a1c1f7;
+$color-primary-light-6: #b6d0fa;
+$color-primary-light-7: #cce0fc;
+$color-primary-light-8: #ddeafe;
+$color-primary-light-9: #eef4ff;
+$color-primary-dark-2:  #2558b8;
+
+// ── Semantic（Grafana light variants）────────────────────────
+$color-success: #1b855e;
+$color-warning: #ff9900;
+$color-danger:  #e0226e;
+$color-info:    #6e9fff;
+
+// ── Grafana Gray Palette ──────────────────────────────────────
+// gray100 → gray05（从浅到深）
+$gray-100: #fbfbfb;   // 最亮，card 背景
+$gray-95:  #f4f5f5;   // page 背景
+$gray-90:  #ececed;   // sidebar 背景 / border
+$gray-85:  #e1e2e3;   // border 标准
+$gray-80:  #d6d7d9;   // border 较深
+$gray-70:  #babcbe;   // disabled
+$gray-60:  #9c9fa3;   // text placeholder
+$gray-25:  #3d4048;   // sidebar text / text regular
+$gray-15:  #22252b;   // text primary
+$gray-05:  #0c0e14;   // 最深，深色场景
+
+// ── Background ───────────────────────────────────────────────
+$bg-page:    $gray-95;   // #f4f5f5
+$bg-card:    $gray-100;  // #fbfbfb
+$bg-sidebar: #f0f1f2;    // Grafana light sidebar：比 page 略深一点点的灰
+$bg-sidebar-active: rgba($color-primary, 0.12);
+
+// ── Text ─────────────────────────────────────────────────────
+$text-primary:     $gray-15;   // #22252b
+$text-regular:     $gray-25;   // #3d4048
+$text-secondary:   $gray-60;   // #9c9fa3
+$text-placeholder: $gray-70;   // #babcbe
+$text-white:       #ffffff;
+
+// ── Border ───────────────────────────────────────────────────
+$border-color:       $gray-85;   // #e1e2e3
+$border-color-light: $gray-90;   // #ececed
+$border-radius:      8px;
+$border-radius-sm:   4px;
+$border-radius-lg:   12px;
+
+// ── Layout ───────────────────────────────────────────────────
+$sidebar-width:           220px;
+$sidebar-collapsed-width: 64px;
+$topbar-height:           56px;
+$content-padding:         24px;
+
+// ── Shadow（Grafana 风格：比原先更轻）────────────────────────
+$shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
+$shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+$shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.04);
+
+// ── Transition ───────────────────────────────────────────────
+$transition-base: all 0.2s ease;
+$transition-fast: all 0.15s ease;
+
+// ── Metric Accent Colors（各指标卡顶部色条）─────────────────
+$accent-tps:         #3871dc;   // 蓝：TPS
+$accent-rt:          #ff7f40;   // 橙：响应时间
+$accent-error:       #e0226e;   // 红：错误率
+$accent-concurrent:  #1b855e;   // 绿：并发
+
+// ============================================================
+// CSS Variables（运行时 + Element Plus 覆盖）
+// ============================================================
+:root {
+  --color-primary:         #{$color-primary};
+  --color-primary-light-1: #{$color-primary-light-1};
+  --color-primary-light-2: #{$color-primary-light-2};
+  --color-primary-light-3: #{$color-primary-light-3};
+  --color-primary-light-4: #{$color-primary-light-4};
+  --color-primary-light-5: #{$color-primary-light-5};
+  --color-primary-light-6: #{$color-primary-light-6};
+  --color-primary-light-7: #{$color-primary-light-7};
+  --color-primary-light-8: #{$color-primary-light-8};
+  --color-primary-light-9: #{$color-primary-light-9};
+  --color-primary-dark-2:  #{$color-primary-dark-2};
+
+  --color-success: #{$color-success};
+  --color-warning: #{$color-warning};
+  --color-danger:  #{$color-danger};
+  --color-info:    #{$color-info};
+
+  --bg-page:    #{$bg-page};
+  --bg-card:    #{$bg-card};
+
+  --text-primary:   #{$text-primary};
+  --text-regular:   #{$text-regular};
+  --text-secondary: #{$text-secondary};
+
+  --border-color:  #{$border-color};
+  --border-radius: #{$border-radius};
+
+  --sidebar-width:           #{$sidebar-width};
+  --sidebar-collapsed-width: #{$sidebar-collapsed-width};
+  --topbar-height:           #{$topbar-height};
+
+  // ── Element Plus 变量覆盖 ──────────────────────────────────
+  --el-color-primary:        #{$color-primary};
+  --el-color-primary-light-1:#{$color-primary-light-1};
+  --el-color-primary-light-2:#{$color-primary-light-2};
+  --el-color-primary-light-3:#{$color-primary-light-3};
+  --el-color-primary-light-4:#{$color-primary-light-4};
+  --el-color-primary-light-5:#{$color-primary-light-5};
+  --el-color-primary-light-6:#{$color-primary-light-6};
+  --el-color-primary-light-7:#{$color-primary-light-7};
+  --el-color-primary-light-8:#{$color-primary-light-8};
+  --el-color-primary-light-9:#{$color-primary-light-9};
+  --el-color-primary-dark-2: #{$color-primary-dark-2};
+
+  --el-color-success: #{$color-success};
+  --el-color-warning: #{$color-warning};
+  --el-color-danger:  #{$color-danger};
+
+  --el-border-radius-base:  #{$border-radius-sm};
+  --el-border-radius-round: 100px;
+
+  --el-bg-color:           #{$bg-card};
+  --el-bg-color-page:      #{$bg-page};
+  --el-fill-color-blank:   #{$bg-card};
+  --el-fill-color-light:   #{$gray-95};
+  --el-fill-color:         #{$gray-90};
+
+  --el-text-color-primary:   #{$text-primary};
+  --el-text-color-regular:   #{$text-regular};
+  --el-text-color-secondary: #{$text-secondary};
+  --el-text-color-placeholder: #{$text-placeholder};
+
+  --el-border-color:         #{$border-color};
+  --el-border-color-light:   #{$border-color-light};
+  --el-border-color-lighter: #{$gray-90};
+
+  --el-box-shadow-light: #{$shadow-sm};
+  --el-box-shadow:       #{$shadow-md};
+
+  --el-font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+  --el-font-size-base: 14px;
+
+  // table
+  --el-table-header-bg-color:  #{$gray-95};
+  --el-table-border-color:     #{$border-color-light};
+  --el-table-row-hover-bg-color: #{$color-primary-light-9};
+  --el-table-current-row-bg-color: #{$color-primary-light-8};
+}

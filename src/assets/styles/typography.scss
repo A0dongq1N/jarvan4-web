@@ -1,0 +1,31 @@
+// ============================================================
+// 腾讯体字体（仅用于品牌位置：Logo、大标题）
+// ============================================================
+
+// 实际项目需将字体文件放入 public/fonts/ 目录
+// 此处定义 @font-face，正文使用系统字体
+@font-face {
+  font-family: 'TencentSans';
+  font-style: normal;
+  font-weight: 400;
+  src: url('/fonts/TencentSans-W3.woff2') format('woff2'),
+       url('/fonts/TencentSans-W3.woff') format('woff');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'TencentSans';
+  font-style: normal;
+  font-weight: 700;
+  src: url('/fonts/TencentSans-W7.woff2') format('woff2'),
+       url('/fonts/TencentSans-W7.woff') format('woff');
+  font-display: swap;
+}
+
+// 品牌文字专用类
+.brand-title,
+.app-logo-text {
+  font-family: 'TencentSans', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
