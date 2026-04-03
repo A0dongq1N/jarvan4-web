@@ -590,7 +590,18 @@ onMounted(async () => {
     task.value = await taskStore.fetchById(taskId.value)
     form.name = task.value.name
     form.description = task.value.description || ''
-    Object.assign(form.scenarioConfig, task.value.scenarioConfig)
+    // 先复制顶层字段，再单独合并 circuitBreaker 以确保字段名对齐
+    const sc = task.value.scenarioConfig
+    Object.assign(form.scenarioConfig, sc)
+    // 防御：后端返回的 circuitBreaker 可能字段不完整或为 null
+    const cb = sc?.circuitBreaker
+    form.scenarioConfig.circuitBreaker = {
+      enabled: cb?.enabled ?? false,
+      rules: Array.isArray(cb?.rules) ? cb!.rules : [],
+      globalErrorRateThreshold: cb?.globalErrorRateThreshold ?? 20,
+      globalWindowSeconds: cb?.globalWindowSeconds ?? 30,
+      globalMinRequests: cb?.globalMinRequests ?? 100,
+    }
     form.scripts = [...task.value.scripts]
   }
   await scriptStore.fetchList({ pageSize: 100 })
@@ -670,17 +681,16 @@ async function handleSave() {
   }
   saving.value = true
   try {
-    const payload = {
-      name: form.name,
-      description: form.description,
-      scenarioConfig: form.scenarioConfig,
-    }
     if (isCreate.value) {
-      const newTask = await taskStore.createTask(payload)
+      const newTask = await taskStore.createTask({ name: form.name, description: form.description })
+      // 创建成功后再保存场景配置
+      await taskStore.updateScene(newTask.id, form.scenarioConfig)
       ElMessage.success('创建成功')
       router.replace(`/task/${newTask.id}`)
     } else {
-      await taskStore.updateTask(taskId.value, payload)
+      // 串行执行：updateTask 内部会 upsert scene_config，必须先完成再覆盖 scene
+      await taskStore.updateTask(taskId.value, { name: form.name, description: form.description })
+      await taskStore.updateScene(taskId.value, form.scenarioConfig)
       ElMessage.success('保存成功')
     }
   } finally {

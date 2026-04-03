@@ -36,6 +36,11 @@ export const useTaskStore = defineStore('task', () => {
     return res.data.data as StressTask
   }
 
+  async function updateScene(id: string, scenarioConfig: StressTask['scenarioConfig']) {
+    const res = await request.put(`/tasks/${id}/scene`, scenarioConfig)
+    return res.data.data as StressTask
+  }
+
   async function deleteTask(id: string) {
     await request.delete(`/tasks/${id}`)
     list.value = list.value.filter(t => t.id !== id)
@@ -64,5 +69,5 @@ export const useTaskStore = defineStore('task', () => {
     await fetchById(taskId)
   }
 
-  return { list, total, currentTask, loading, fetchList, fetchById, createTask, updateTask, deleteTask, bindScript, unbindScript, updateScriptEnvVars }
+  return { list, total, currentTask, loading, fetchList, fetchById, createTask, updateTask, updateScene, deleteTask, bindScript, unbindScript, updateScriptEnvVars }
 })
