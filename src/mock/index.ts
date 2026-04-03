@@ -7,16 +7,15 @@ import { taskHandlers } from './handlers/task'
 // scriptHandlers 已联调，不再 mock
 // executionHandlers 已联调，不再 mock
 // reportHandlers 已联调，不再 mock
+// auditHandlers 已联调，不再 mock
 import { workerHandlers } from './handlers/worker'
 import { projectHandlers } from './handlers/project'
-import { auditHandlers } from './handlers/audit'
 
 const allHandlers: MockHandler[] = [
   ...authHandlers,
   ...taskHandlers,
   ...workerHandlers,
   ...projectHandlers,
-  ...auditHandlers,
 ]
 
 // Compile URL pattern: /tasks/:id → regex
