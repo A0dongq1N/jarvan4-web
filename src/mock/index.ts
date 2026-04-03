@@ -4,7 +4,7 @@ import type { MockHandler } from './types'
 // Import all handlers
 import { authHandlers } from './handlers/auth'
 import { taskHandlers } from './handlers/task'
-import { scriptHandlers } from './handlers/script'
+// scriptHandlers 已联调，不再 mock
 import { executionHandlers } from './handlers/execution'
 import { reportHandlers } from './handlers/report'
 import { workerHandlers } from './handlers/worker'
@@ -14,7 +14,6 @@ import { auditHandlers } from './handlers/audit'
 const allHandlers: MockHandler[] = [
   ...authHandlers,
   ...taskHandlers,
-  ...scriptHandlers,
   ...executionHandlers,
   ...reportHandlers,
   ...workerHandlers,
