@@ -4,8 +4,9 @@ import type { UserInfo } from '@/types'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('stress_token'))
+  const _rawUserInfo = localStorage.getItem('stress_userinfo')
   const userInfo = ref<UserInfo | null>(
-    JSON.parse(localStorage.getItem('stress_userinfo') || 'null')
+    _rawUserInfo && _rawUserInfo !== 'undefined' ? JSON.parse(_rawUserInfo) : null
   )
 
   const isLoggedIn = computed(() => !!token.value)
