@@ -8,13 +8,12 @@ import { taskHandlers } from './handlers/task'
 // executionHandlers 已联调，不再 mock
 // reportHandlers 已联调，不再 mock
 // auditHandlers 已联调，不再 mock
-import { workerHandlers } from './handlers/worker'
+// workerHandlers 已联调，不再 mock
 import { projectHandlers } from './handlers/project'
 
 const allHandlers: MockHandler[] = [
   ...authHandlers,
   ...taskHandlers,
-  ...workerHandlers,
   ...projectHandlers,
 ]
 
