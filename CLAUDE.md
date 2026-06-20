@@ -83,7 +83,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     ▼
 Master (trpc-go, :8080/:8081)
     │  ├── 订阅 stress-worker 服务列表
-    │  │         ▲  Nacos（TSE 托管）
+    │  │         ▲  PolarisMesh
     │  │         │  Worker 启动时注册（Pod IP + 元数据）
     │  │
     │  └── tRPC 点对点（直连 Worker Pod IP:9090）
@@ -98,9 +98,9 @@ MySQL + Redis（Master 持久化 & 实时状态）
 ```
 
 - **前端**：纯前端项目，目前为 mock 模式，所有 API 请求被 Axios 拦截器伪造应答，不需要启动后端
-- **Master**：Go + trpc-go（http_no_protocol 模式），对外 `:8080`（前端 API），对内 `:8081`（Worker 通信）；通过 Nacos 订阅 Worker 服务列表，向具体 Worker Pod IP 发起 tRPC 调用（点对点，不经 K8s Service）
-- **Worker**：独立 Go 进程，暴露 `:9090`；启动时通过 `nacos-sdk-go v2` 将自身（Pod IP + 元数据）注册到 Nacos；接收 Master 下发任务、从对象存储拉取 `.so` 并执行；运行期每秒推送全局指标，运行结束推送接口级直方图
-- **Nacos**：**不部署在 K8s 内**（避免循环依赖），开发用 standalone Docker，生产用腾讯云 TSE（Nacos 托管，3 节点 HA）
+- **Master**：Go + trpc-go（http_no_protocol 模式），对外 `:8080`（前端 API），对内 `:8081`（Worker 通信）；通过 Polaris 订阅 Worker 服务列表，向具体 Worker Pod IP 发起 tRPC 调用（点对点，不经 K8s Service）
+- **Worker**：独立 Go 进程，暴露 `:9090`；启动时通过 `polaris-go` 将自身（Pod IP + 元数据）注册到 Polaris；接收 Master 下发任务、从对象存储拉取 `.so` 并执行；运行期每秒推送全局指标，运行结束推送接口级直方图
+- **Polaris**：**不部署在 K8s 内**（避免循环依赖），开发用 standalone，生产用 PolarisMesh 独立集群
 - **存储**：MySQL 持久化 + Redis 实时状态（Key 规则见 `docs/02-概要设计.md` 第4节）
 
 ### 两阶段部署策略
@@ -108,20 +108,20 @@ MySQL + Redis（Master 持久化 & 实时状态）
 | | 阶段一（开发期） | 阶段二（生产） |
 |---|---|---|
 | 基础设施 | `go run` + Docker Compose | 腾讯云 TKE（K8s）|
-| Nacos | standalone Docker | TSE 托管（VPC 内网）|
+| Polaris | standalone | PolarisMesh 独立集群 |
 | MySQL/Redis | Docker Compose | CDB / TencentDB Redis |
 | 前端→Master | 直连 `localhost:8080` | APISIX Ingress → Master Service |
 | Master→Worker | 直连 Pod IP（本地 `localhost`） | 直连 Worker Pod IP（Downward API 注入）|
 | APISIX | **不用** | APISIX Ingress Controller |
 
-**K8s 中 Worker 获取自身 IP**：通过 K8s Downward API 将 `status.podIP` 注入环境变量 `POD_IP`，Worker 启动时读取并注册到 Nacos。Master 从 Nacos 拿到 Pod IP 后直接发 tRPC，绕过 K8s Service 的随机负载均衡。
+**K8s 中 Worker 获取自身 IP**：通过 K8s Downward API 将 `status.podIP` 注入环境变量 `POD_IP`，Worker 启动时读取并注册到 Polaris。Master 从 Polaris 拿到 Pod IP 后直接发 tRPC，绕过 K8s Service 的随机负载均衡。
 
-### Nacos 集成要点
+### Polaris 集成要点
 
-- **用 `nacos-sdk-go v2` 直接集成**，trpc-go 没有官方 Nacos 插件，不要尝试用 trpc 插件机制
+- **用 `polaris-go` 直接集成**，trpc-go 没有官方 Polaris 插件，不要尝试用 trpc 插件机制
 - Worker 注册服务名：`stress-worker`，元数据：`workerId / cpu_cores / mem_total_gb / max_concurrency / port`
-- Master 通过 `NamingClient.Subscribe("stress-worker")` 监听服务变更，维护内存 Worker 列表
-- Nacos **只负责服务发现（存活探测）**；Worker→Master 的负载心跳（cpu_usage / mem_usage / current_concurrency）通过独立的 tRPC 心跳接口上报，两者解耦
+- Master 通过 `ConsumerAPI.GetAllInstances("stress-worker")` 轮询获取实例列表，维护内存 Worker 列表
+- Polaris **只负责服务发现（存活探测）**；Worker→Master 的负载心跳（cpu_usage / mem_usage / current_concurrency）通过独立的 tRPC 心跳接口上报，两者解耦
 
 ---
 

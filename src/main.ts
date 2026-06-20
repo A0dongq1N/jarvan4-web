@@ -4,8 +4,8 @@ import router from './router'
 import App from './App.vue'
 import '@/assets/styles/index.scss'
 
-// Setup mock in dev mode
-if (import.meta.env.DEV) {
+// Setup mock in dev mode (disabled by VITE_USE_MOCK=false)
+if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCK !== 'false') {
   const { setupMock } = await import('./mock/index')
   const request = (await import('./utils/request')).default
   setupMock(request)
