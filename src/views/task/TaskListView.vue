@@ -1,6 +1,9 @@
 <template>
   <div class="task-list-view">
-    <PageHeader title="压测任务" subtitle="管理和执行压测任务">
+    <PageHeader
+      :title="projectStore.currentProject ? `${projectStore.currentProject.name} · 压测任务` : '压测任务'"
+      subtitle="管理和执行压测任务"
+    >
       <el-button type="primary" :icon="Plus" @click="openCreate">新建任务</el-button>
     </PageHeader>
 
@@ -133,6 +136,7 @@ import { Plus, Search, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useTaskStore } from '@/stores/task'
 import { useReportStore } from '@/stores/report'
+import { useProjectStore } from '@/stores/project'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -142,6 +146,7 @@ import type { StressTask } from '@/types'
 const router = useRouter()
 const taskStore = useTaskStore()
 const reportStore = useReportStore()
+const projectStore = useProjectStore()
 
 const searchKeyword = ref('')
 const statusFilter = ref('')
@@ -168,6 +173,8 @@ async function loadTasks() {
     pageSize: pageSize.value,
     keyword: searchKeyword.value,
     status: statusFilter.value,
+    // 若当前已选择项目，只加载该项目的任务
+    ...(projectStore.currentProject ? { projectId: projectStore.currentProject.id } : {}),
   })
 }
 

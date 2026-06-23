@@ -9,7 +9,7 @@ export const useTaskStore = defineStore('task', () => {
   const currentTask = ref<StressTask | null>(null)
   const loading = ref(false)
 
-  async function fetchList(params?: { page?: number; pageSize?: number; keyword?: string; status?: string }) {
+  async function fetchList(params?: { page?: number; pageSize?: number; keyword?: string; status?: string; projectId?: string }) {
     loading.value = true
     try {
       const res = await request.get('/tasks', { params })
