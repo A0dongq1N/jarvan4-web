@@ -40,7 +40,7 @@
         </el-table-column>
         <el-table-column label="平均响应" width="120">
           <template #default="{ row }">
-            {{ formatNumber(row.summary.avgResponseTime, 0) }} ms
+            {{ formatMs(row.summary.avgResponseTime) }}
           </template>
         </el-table-column>
         <el-table-column label="错误率" width="100">
@@ -98,7 +98,7 @@ import { useReportStore } from '@/stores/report'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import { formatNumber, formatPercent, formatDuration, formatTime } from '@/utils/format'
+import { formatNumber, formatMs, formatPercent, formatDuration, formatTime } from '@/utils/format'
 import type { Report } from '@/types'
 
 const reportStore = useReportStore()

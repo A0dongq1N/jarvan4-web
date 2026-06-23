@@ -46,10 +46,17 @@ export function formatBytes(bytes: number): string {
 
 /**
  * 格式化响应时间 (ms)
+ * - < 0.01ms: 显示 3 位小数（微秒级精度）
+ * - 0.01 ~ 1ms: 显示 2 位小数
+ * - 1 ~ 1000ms: 显示 1 位小数
+ * - >= 1000ms: 转换为秒
  */
 export function formatMs(ms: number): string {
-  if (ms < 1000) return `${ms.toFixed(0)} ms`
-  return `${(ms / 1000).toFixed(2)} s`
+  if (!ms || ms === 0) return '0 ms'
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`
+  if (ms >= 1) return `${ms.toFixed(1)} ms`
+  if (ms >= 0.01) return `${ms.toFixed(2)} ms`
+  return `${ms.toFixed(3)} ms`
 }
 
 /**

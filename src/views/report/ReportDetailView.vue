@@ -28,8 +28,8 @@
       <!-- Summary Metrics -->
       <div class="summary-grid">
         <MetricCard label="峰值 RPS" :value="formatNumber(report.summary.rps, 0)" unit="req/s" accent="#3871dc" />
-        <MetricCard label="平均响应时间" :value="formatNumber(report.summary.avgResponseTime, 0)" unit="ms" accent="#ff7f40" />
-        <MetricCard label="P99 响应时间" :value="formatNumber(report.summary.p99ResponseTime, 0)" unit="ms" accent="#ff7f40" />
+        <MetricCard label="平均响应时间" :value="formatMs(report.summary.avgResponseTime)" unit="ms" accent="#ff7f40" />
+        <MetricCard label="P99 响应时间" :value="formatMs(report.summary.p99ResponseTime)" unit="ms" accent="#ff7f40" />
         <MetricCard
           label="错误率"
           :value="formatPercent(report.summary.errorRate)"
@@ -246,7 +246,7 @@ import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
-import { formatNumber, formatPercent, formatTime, formatDuration } from '@/utils/format'
+import { formatNumber, formatMs, formatPercent, formatTime, formatDuration } from '@/utils/format'
 import type { PercentileData } from '@/types'
 
 const route = useRoute()
