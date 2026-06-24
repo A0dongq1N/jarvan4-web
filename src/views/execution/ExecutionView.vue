@@ -93,7 +93,7 @@
         />
         <MetricCard
           label="平均响应时间"
-          :value="formatNumber(executionStore.summary.avgResponseTime, 0)"
+          :value="formatMs(executionStore.summary.avgResponseTime)"
           unit="ms"
           accent="#ff7f40"
         />
@@ -288,7 +288,7 @@ import ResponseTimeChart from '@/components/charts/ResponseTimeChart.vue'
 import ErrorRateChart from '@/components/charts/ErrorRateChart.vue'
 import ConcurrentChart from '@/components/charts/ConcurrentChart.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
-import { formatNumber, formatPercent, formatDuration } from '@/utils/format'
+import { formatNumber, formatMs, formatPercent, formatDuration } from '@/utils/format'
 import type { TaskStatus, PercentileData } from '@/types'
 
 const route = useRoute()

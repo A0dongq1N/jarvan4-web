@@ -45,7 +45,9 @@ const option = computed(() => ({
     textStyle: { color: '#22252b', fontSize: 12 },
     formatter: (params: any) => {
       const p = params[0]
-      return `<span style="color:#9c9fa3;font-size:11px">${p.axisValue}</span><br/>响应时间 <b style="color:#ff7f40">${p.value?.toFixed(0)} ms</b>`
+      const v = p.value ?? 0
+      const display = v >= 1 ? v.toFixed(1) : v >= 0.01 ? v.toFixed(2) : v.toFixed(3)
+      return `<span style="color:#9c9fa3;font-size:11px">${p.axisValue}</span><br/>响应时间 <b style="color:#ff7f40">${display} ms</b>`
     },
   },
   series: [{
