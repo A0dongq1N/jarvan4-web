@@ -376,11 +376,11 @@
             <el-table-column label="操作" width="100" fixed="right">
               <template #default="{ row }">
                 <el-button
-                  v-if="row.reportId"
+                  v-if="row.status === 'success'"
                   size="small"
                   type="primary"
                   text
-                  @click="goReport(row.reportId)"
+                  @click="goReport(row.id)"
                 >查看报告</el-button>
                 <span v-else style="color:#9c9fa3;font-size:12px">—</span>
               </template>
