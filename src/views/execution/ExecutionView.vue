@@ -94,17 +94,41 @@
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- 脚本部署进度 -->
-      <div v-if="executionStore.state?.scriptStatuses?.length" class="script-deploy">
-        <div class="script-deploy__title">脚本部署</div>
-        <div class="script-deploy-list">
-          <div
-            v-for="s in executionStore.state.scriptStatuses"
-            :key="s.scriptId"
-            class="script-deploy-item"
-            :class="`script-deploy-item--${s.status}`"
-          >
+    <!-- Prepared: 部署完成待执行 -->
+    <div v-if="executionStatus === 'prepared'" class="prepared-panel">
+      <div class="prepared-panel__icon">
+        <svg viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15" />
+          <path d="M7 12.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <div class="prepared-panel__text">
+        <div class="prepared-panel__title">脚本部署完成，点击开始压测</div>
+        <div class="prepared-panel__hint">
+          已选定 Worker 节点并加载脚本插件，等待手动触发流量注入
+        </div>
+      </div>
+    </div>
+
+    <!-- 脚本部署进度（preparing 和 prepared 状态都显示，独立区块） -->
+    <div
+      v-if="(executionStatus === 'preparing' || executionStatus === 'prepared') && executionStore.state?.scriptStatuses?.length"
+      class="script-deploy"
+    >
+      <div class="script-deploy__header">
+        <span class="script-deploy__title">脚本部署</span>
+        <span class="script-deploy__summary" :class="scriptDeploySummaryClass">{{ scriptDeploySummary }}</span>
+      </div>
+      <div class="script-deploy-list">
+        <div
+          v-for="s in executionStore.state.scriptStatuses"
+          :key="s.scriptId"
+          class="script-deploy-item"
+          :class="`script-deploy-item--${s.status}`"
+        >
+          <div class="script-deploy-item__main">
             <span class="script-deploy-item__icon">
               <svg v-if="s.status === 'downloading'" class="spin-icon" viewBox="0 0 24 24" fill="none">
                 <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-dasharray="28 56" />
@@ -122,25 +146,24 @@
               </svg>
             </span>
             <span class="script-deploy-item__name">{{ s.scriptName }}</span>
-            <code class="script-deploy-item__hash">{{ s.commitHash.slice(0, 8) }}</code>
-            <span class="script-deploy-item__status">({{ scriptStatusLabel(s.status) }})</span>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Prepared: 部署完成待执行 -->
-    <div v-if="executionStatus === 'prepared'" class="prepared-panel">
-      <div class="prepared-panel__icon">
-        <svg viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15" />
-          <path d="M7 12.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </div>
-      <div class="prepared-panel__text">
-        <div class="prepared-panel__title">脚本部署完成，点击开始压测</div>
-        <div class="prepared-panel__hint">
-          已选定 Worker 节点并加载脚本插件，等待手动触发流量注入
+          <div class="script-deploy-item__meta">
+            <div class="script-deploy-item__row">
+              <span class="script-deploy-item__label">commit:</span>
+              <code class="script-deploy-item__hash">{{ s.commitHash ? s.commitHash.slice(0, 8) : '-' }}</code>
+            </div>
+            <div class="script-deploy-item__row">
+              <span class="script-deploy-item__label">artifact:</span>
+              <code class="script-deploy-item__artifact">{{ s.artifactUrl || '-' }}</code>
+            </div>
+            <div class="script-deploy-item__row">
+              <span class="script-deploy-item__label">状态:</span>
+              <span class="script-deploy-item__status">{{ scriptStatusLabel(s.status) }}</span>
+            </div>
+          </div>
+          <div v-if="s.status === 'failed' && s.error" class="script-deploy-item__error">
+            错误: {{ s.error }}
+          </div>
         </div>
       </div>
     </div>
@@ -567,6 +590,27 @@ function scriptStatusLabel(status: ScriptStatus): string {
   }
   return map[status] || status
 }
+
+// 脚本部署统计摘要："2/2 已就绪" 或 "1/2 已就绪，1 失败"
+const scriptDeploySummary = computed(() => {
+  const list = executionStore.state?.scriptStatuses ?? []
+  if (!list.length) return ''
+  const ready = list.filter(s => s.status === 'ready').length
+  const failed = list.filter(s => s.status === 'failed').length
+  const total = list.length
+  if (failed > 0) return `${ready}/${total} 已就绪，${failed} 失败`
+  return `${ready}/${total} 已就绪`
+})
+
+const scriptDeploySummaryClass = computed(() => {
+  const list = executionStore.state?.scriptStatuses ?? []
+  if (!list.length) return ''
+  const failed = list.filter(s => s.status === 'failed').length
+  const ready = list.filter(s => s.status === 'ready').length
+  if (failed > 0) return 'script-deploy__summary--has-failed'
+  if (ready === list.length) return 'script-deploy__summary--all-ready'
+  return ''
+})
 </script>
 
 <style lang="scss" scoped>
@@ -817,17 +861,33 @@ function scriptStatusLabel(status: ScriptStatus): string {
   to   { transform: rotate(360deg); }
 }
 
-// ── 脚本部署进度 ───────────────────────────────────────────────────────
+// ── 脚本部署进度（独立区块，preparing 和 prepared 状态都显示） ──────────
 .script-deploy {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid $border-color-light;
+  background: $bg-card;
+  border-radius: $border-radius;
+  padding: 20px 24px;
+  box-shadow: $shadow-sm;
+
+  &__header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
 
   &__title {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     color: $text-primary;
-    margin-bottom: 14px;
+  }
+
+  &__summary {
+    font-size: 13px;
+    color: $text-secondary;
+    font-variant-numeric: tabular-nums;
+
+    &--all-ready { color: $color-success; font-weight: 600; }
+    &--has-failed { color: $color-danger; font-weight: 600; }
   }
 }
 
@@ -838,13 +898,16 @@ function scriptStatusLabel(status: ScriptStatus): string {
 }
 
 .script-deploy-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  padding: 8px 12px;
+  padding: 12px 14px;
   background: $bg-page;
   border-radius: $border-radius-sm;
+  border-left: 3px solid transparent;
+
+  &__main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
 
   &__icon {
     width: 18px;
@@ -859,27 +922,92 @@ function scriptStatusLabel(status: ScriptStatus): string {
 
   &__name {
     font-family: 'SFMono-Regular', Consolas, monospace;
-    font-weight: 500;
+    font-weight: 600;
+    font-size: 13px;
     color: $text-primary;
   }
 
+  // 元信息块：与脚本名对齐（icon 18 + gap 10 = 28px）
+  &__meta {
+    margin-top: 8px;
+    padding-left: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  &__row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  &__label {
+    color: $text-secondary;
+    flex-shrink: 0;
+    width: 56px;
+  }
+
   &__hash {
-    font-size: 11px;
-    background: $color-primary-light-9;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 12px;
     color: $color-primary;
+    background: $color-primary-light-9;
     padding: 1px 6px;
     border-radius: 4px;
   }
 
-  &__status {
-    color: $text-secondary;
+  &__artifact {
+    font-family: 'SFMono-Regular', Consolas, monospace;
     font-size: 12px;
+    color: $text-regular;
+    word-break: break-all;
   }
 
-  &--ready &__icon { color: $color-success; }
-  &--downloading &__icon { color: #d48806; }
-  &--failed &__icon { color: $color-danger; }
-  &--pending &__icon { color: $text-secondary; }
+  &__status {
+    font-size: 12px;
+    color: $text-secondary;
+  }
+
+  &__error {
+    margin-top: 8px;
+    margin-left: 28px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: $color-danger;
+    background: rgba($color-danger, 0.06);
+    border-radius: 4px;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    word-break: break-all;
+  }
+
+  // 状态颜色：失败红、就绪绿、下载中橙、等待灰
+  &--ready {
+    border-left-color: $color-success;
+    .script-deploy-item__icon { color: $color-success; }
+    .script-deploy-item__name { color: $color-success; }
+    .script-deploy-item__status { color: $color-success; }
+  }
+
+  &--downloading {
+    border-left-color: #d48806;
+    .script-deploy-item__icon { color: #d48806; }
+    .script-deploy-item__status { color: #d48806; }
+  }
+
+  &--failed {
+    border-left-color: $color-danger;
+    background: rgba($color-danger, 0.04);
+    .script-deploy-item__icon { color: $color-danger; }
+    .script-deploy-item__name { color: $color-danger; }
+    .script-deploy-item__status { color: $color-danger; }
+  }
+
+  &--pending {
+    border-left-color: $border-color-light;
+    .script-deploy-item__icon { color: $text-secondary; }
+  }
 }
 
 // ── 指标 & 图表区 ──────────────────────────────────────────────────────

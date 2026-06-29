@@ -30,6 +30,7 @@ export interface ScriptStatusInfo {
   commitHash: string
   artifactUrl: string
   status: ScriptStatus
+  error?: string
 }
 
 // 用户
