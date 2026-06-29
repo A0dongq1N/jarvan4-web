@@ -302,7 +302,7 @@ function makeLineOption(data: any[], color: string, yAxisFormatter?: (v: number)
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: data.map(p => new Date(p.timestamp).toLocaleTimeString()),
+      data: data.map(p => new Date(p.timestamp * 1000).toLocaleTimeString()),
       axisLabel: { color: LABEL_COLOR, fontSize: 11 },
       axisLine: { lineStyle: { color: AXIS_COLOR } },
       axisTick: { show: false },
