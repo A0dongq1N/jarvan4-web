@@ -402,20 +402,36 @@ export const executionHandlers: MockHandler[] = [
         const r = executions.get(id)
         if (!r || r.execution.status !== 'preparing') return
         r.execution.initSteps![2] = { key: 'load_plugin', label: '加载脚本插件（plugin.Open）', status: 'done', detail: '全部 Worker 加载成功' }
-        r.execution.initSteps![3] = { key: 'inject_start', label: '开始注入流量', status: 'running', detail: '' }
+        // 步骤 4 "开始注入流量" 保持 waiting，等用户手动触发
       }, 2000)
+      // 部署完成：转入 prepared 状态，等用户手动 start
       setTimeout(() => {
         const r = executions.get(id)
         if (!r || r.execution.status !== 'preparing') return
-        r.execution.initSteps![3] = { key: 'inject_start', label: '开始注入流量', status: 'done', detail: '' }
-        r.execution.status = 'running'
-        r.startTime = Date.now()  // running 计时从此刻开始
+        r.execution.status = 'prepared'
       }, 2500)
 
+      return ok(record.execution)
+    },
+  },
+  // ── 手动触发开始压测（prepared → running）──────────────────────────────
+  {
+    method: 'POST',
+    url: '/executions/:id/start',
+    handler: ({ params }) => {
+      const record = executions.get(params.id)
+      if (!record) return fail('执行记录不存在', 404)
+      if (record.execution.status !== 'prepared') {
+        return fail(`当前状态 ${record.execution.status} 无法启动压测`, 400)
+      }
+      record.execution.status = 'running'
+      record.execution.initSteps![3] = { key: 'inject_start', label: '开始注入流量', status: 'done', detail: '' }
+      record.startTime = Date.now()  // running 计时从此刻开始
+
       // Auto-stop after duration (or 2 minutes max for demo)
-      const stopAfter = Math.min((scenarioConfig.duration ?? 120) * 1000, 180000) + 2500
+      const stopAfter = Math.min((record.scenarioConfig.duration ?? 120) * 1000, 180000)
       setTimeout(() => {
-        const r = executions.get(id)
+        const r = executions.get(params.id)
         if (r && r.execution.status === 'running') {
           r.execution.status = 'success'
           r.execution.endTime = new Date().toISOString()

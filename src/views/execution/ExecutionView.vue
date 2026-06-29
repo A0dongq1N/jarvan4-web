@@ -27,8 +27,20 @@
         >
           开始压测
         </el-button>
+        <!-- prepared: 部署完成，手动触发开始压测（醒目大按钮） -->
         <el-button
-          v-if="executionStatus === 'pending' || executionStatus === 'preparing' || executionStatus === 'running'"
+          v-if="executionStatus === 'prepared'"
+          type="primary"
+          :icon="VideoPlay"
+          size="large"
+          class="start-run-btn"
+          :loading="executionStore.loading"
+          @click="handleStartRun"
+        >
+          开始压测
+        </el-button>
+        <el-button
+          v-if="executionStatus === 'pending' || executionStatus === 'preparing' || executionStatus === 'prepared' || executionStatus === 'running'"
           type="danger"
           :icon="VideoPause"
           size="large"
@@ -117,8 +129,24 @@
       </div>
     </div>
 
-    <!-- Summary Metrics（running 及之后才显示） -->
-    <template v-if="executionStatus !== 'pending' && executionStatus !== 'preparing' && executionStatus !== 'idle'">
+    <!-- Prepared: 部署完成待执行 -->
+    <div v-if="executionStatus === 'prepared'" class="prepared-panel">
+      <div class="prepared-panel__icon">
+        <svg viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15" />
+          <path d="M7 12.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <div class="prepared-panel__text">
+        <div class="prepared-panel__title">脚本部署完成，点击开始压测</div>
+        <div class="prepared-panel__hint">
+          已选定 Worker 节点并加载脚本插件，等待手动触发流量注入
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary Metrics（running 及之后才显示，prepared 不显示） -->
+    <template v-if="executionStatus !== 'pending' && executionStatus !== 'preparing' && executionStatus !== 'prepared' && executionStatus !== 'idle'">
       <div class="metrics-summary">
         <MetricCard
           label="当前 RPS"
@@ -486,8 +514,16 @@ watch(() => executionStore.logs.length, async () => {
 })
 
 watch(executionStatus, (status, prevStatus) => {
-  // 仅在从 pending/preparing 转 running 时提示（排除刷新恢复时 null→running 的误触发）
-  if (status === 'running' && (prevStatus === 'pending' || prevStatus === 'preparing')) {
+  // pending/preparing → prepared：脚本部署完成
+  if (status === 'prepared' && (prevStatus === 'pending' || prevStatus === 'preparing')) {
+    ElMessage.success('脚本部署完成，等待开始压测')
+  }
+  // prepared → running：手动触发开始注入流量
+  else if (status === 'running' && prevStatus === 'prepared') {
+    ElMessage.success('开始注入流量')
+  }
+  // 兼容旧流程：pending/preparing 直接转 running
+  else if (status === 'running' && (prevStatus === 'pending' || prevStatus === 'preparing')) {
     ElMessage.success('环境初始化完成，开始注入流量')
   } else if (status === 'success') {
     ElMessage.success('压测完成，正在跳转报告...')
@@ -504,6 +540,12 @@ async function handleStart() {
   if (executionStore.state?.id) {
     router.replace({ query: { ...route.query, execId: executionStore.state.id, autostart: undefined } })
   }
+}
+
+// prepared → running：手动触发已部署的执行
+async function handleStartRun() {
+  if (!executionStore.state?.id) return
+  await executionStore.startRun(executionStore.state.id)
 }
 
 async function handleStop() {
@@ -582,6 +624,57 @@ function scriptStatusLabel(status: ScriptStatus): string {
   font-weight: 600;
   color: #722ed1;
   letter-spacing: 0.02em;
+}
+
+// prepared 状态：开始压测按钮 - 带脉冲动画醒目
+.start-run-btn {
+  animation: pulse-btn 2s infinite;
+}
+
+@keyframes pulse-btn {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(56, 113, 220, 0.5); }
+  50% { box-shadow: 0 0 0 10px rgba(56, 113, 220, 0); }
+}
+
+// ── Prepared 部署完成提示面板 ──────────────────────────────────────────
+.prepared-panel {
+  background: $bg-card;
+  border-radius: $border-radius;
+  padding: 32px;
+  box-shadow: $shadow-sm;
+  border: 1px solid rgba(8, 151, 156, 0.25);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+
+  &__icon {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    color: #08979c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    svg { width: 48px; height: 48px; }
+  }
+
+  &__text {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &__title {
+    font-size: 18px;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  &__hint {
+    font-size: 13px;
+    color: $text-secondary;
+  }
 }
 
 // ── Pending 初始化面板 ─────────────────────────────────────────────────

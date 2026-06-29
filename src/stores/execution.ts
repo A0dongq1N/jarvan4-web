@@ -66,12 +66,28 @@ export const useExecutionStore = defineStore('execution', () => {
       clearCharts()
 
       if (executionState.status === 'pending' || executionState.status === 'preparing') {
-        // pending/preparing 阶段：轮询初始化与脚本部署进度，等待转 running
+        // pending/preparing 阶段：轮询初始化与脚本部署进度，等待转 prepared
         _startInitPoller(executionState.id)
+      } else if (executionState.status === 'prepared') {
+        // prepared：部署完成，等用户手动 startRun，不启动任何轮询
+        _stopInitPoller()
       } else {
         // 直接 running（理论上不会，但保留兼容）
         startTimers(executionState.id)
       }
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // 手动触发已部署（prepared）的执行开始压测
+  async function startRun(executionId: string) {
+    loading.value = true
+    try {
+      const res = await request.post(`/executions/${executionId}/start`)
+      state.value = res.data.data
+      // 转入 running，启动指标/日志轮询
+      startTimers(executionId)
     } finally {
       loading.value = false
     }
@@ -97,8 +113,12 @@ export const useExecutionStore = defineStore('execution', () => {
         const s: ExecutionState = res.data.data
         state.value = s
         if (s.status === 'running') {
+          // 后端直接转 running（兼容旧流程）
           _stopInitPoller()
           startTimers(executionId)
+        } else if (s.status === 'prepared') {
+          // 部署完成，等用户手动 startRun，停止轮询
+          _stopInitPoller()
         } else if (s.status !== 'pending' && s.status !== 'preparing') {
           // stopped / failed during init
           _stopInitPoller()
@@ -235,12 +255,12 @@ export const useExecutionStore = defineStore('execution', () => {
     } else if (s.status === 'pending' || s.status === 'preparing') {
       _startInitPoller(executionId)
     }
-    // success / failed / stopped：仅展示终态，不启动轮询
+    // prepared / success / failed / stopped：仅展示终态/待执行态，不启动轮询
   }
 
   return {
     state, summary, rpsData, responseTimeData, errorRateData, concurrentData, logs, loading,
     scenarioMode, targetRps, livePercentiles, liveErrors,
-    startExecution, stopExecution, fetchState, resumeExecution, startTimers, stopTimers, reset, clearCharts
+    startExecution, startRun, stopExecution, fetchState, resumeExecution, startTimers, stopTimers, reset, clearCharts
   }
 })

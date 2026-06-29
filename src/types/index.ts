@@ -17,7 +17,8 @@ export interface PageResult<T> {
 }
 
 // 状态枚举
-export type TaskStatus = 'idle' | 'pending' | 'preparing' | 'running' | 'success' | 'failed' | 'stopped' | 'circuit_broken'
+// prepared: 脚本部署完成，等待用户手动触发开始压测
+export type TaskStatus = 'idle' | 'pending' | 'preparing' | 'prepared' | 'running' | 'success' | 'failed' | 'stopped' | 'circuit_broken'
 export type ScriptLanguage = 'go' | 'python' | 'javascript'
 
 // 脚本部署状态（preparing 阶段展示）
