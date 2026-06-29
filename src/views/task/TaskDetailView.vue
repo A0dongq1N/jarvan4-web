@@ -345,7 +345,45 @@
           </div>
           <div v-if="historyLoading" v-loading="true" style="height: 200px" />
           <EmptyState v-else-if="historyList.length === 0" title="暂无执行记录" desc="点击「执行压测」按钮发起第一次压测" />
-          <el-table v-else :data="historyList" style="width: 100%">
+          <el-table v-else :data="historyList" style="width: 100%" row-key="id">
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div v-if="row.scriptStatuses && row.scriptStatuses.length" class="history-expand">
+                  <div class="history-expand__title">脚本部署</div>
+                  <div class="script-deploy-list">
+                    <div
+                      v-for="s in row.scriptStatuses"
+                      :key="s.scriptId"
+                      class="script-deploy-item"
+                      :class="`script-deploy-item--${s.status}`"
+                    >
+                      <span class="script-deploy-item__icon">
+                        <svg v-if="s.status === 'downloading'" class="spin-icon" viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-dasharray="28 56" />
+                        </svg>
+                        <svg v-else-if="s.status === 'ready'" viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15" />
+                          <path d="M7 12.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <svg v-else-if="s.status === 'failed'" viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15" />
+                          <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        </svg>
+                        <svg v-else viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4" />
+                        </svg>
+                      </span>
+                      <span class="script-deploy-item__name">{{ s.scriptName }}</span>
+                      <code class="script-deploy-item__hash">{{ s.commitHash.slice(0, 8) }}</code>
+                      <span class="script-deploy-item__status">({{ scriptStatusLabel(s.status) }})</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="history-expand history-expand--empty">
+                  <span style="color:#9c9fa3;font-size:12px">无脚本部署记录</span>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="执行ID" prop="id" width="140">
               <template #default="{ row }">
                 <code style="font-size:12px;color:#6b7280">{{ row.id }}</code>
@@ -412,7 +450,7 @@ import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
-import type { StressTask, ScenarioConfig, ExecutionRecord } from '@/types'
+import type { StressTask, ScenarioConfig, ExecutionRecord, ScriptStatus } from '@/types'
 import { formatTime, formatDuration } from '@/utils/format'
 import request from '@/utils/request'
 
@@ -704,6 +742,16 @@ function goExecution() {
 
 function goReport(reportId: string) {
   router.push(`/report/${reportId}`)
+}
+
+function scriptStatusLabel(status: ScriptStatus): string {
+  const map: Record<ScriptStatus, string> = {
+    pending: '等待中',
+    downloading: '下载中...',
+    ready: '已就绪',
+    failed: '失败',
+  }
+  return map[status] || status
 }
 </script>
 
@@ -1049,5 +1097,80 @@ function goReport(reportId: string) {
     font-weight: 600;
     color: $text-primary;
   }
+}
+
+.history-expand {
+  padding: 12px 20px;
+  background: $bg-page;
+  border-radius: $border-radius-sm;
+
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: $text-primary;
+    margin-bottom: 10px;
+  }
+
+  &--empty {
+    background: transparent;
+  }
+}
+
+.script-deploy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.script-deploy-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+
+  &__icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    svg { width: 16px; height: 16px; }
+  }
+
+  &__name {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-weight: 500;
+    color: $text-primary;
+  }
+
+  &__hash {
+    font-size: 11px;
+    background: $color-primary-light-9;
+    color: $color-primary;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  &__status {
+    color: $text-secondary;
+    font-size: 12px;
+  }
+
+  &--ready &__icon { color: $color-success; }
+  &--downloading &__icon { color: #d48806; }
+  &--failed &__icon { color: $color-danger; }
+  &--pending &__icon { color: $text-secondary; }
+}
+
+.spin-icon {
+  animation: spin 0.9s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 </style>

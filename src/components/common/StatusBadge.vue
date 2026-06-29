@@ -14,6 +14,7 @@ const props = defineProps<{ status: TaskStatus }>()
 const labelMap: Record<TaskStatus, string> = {
   idle: '空闲',
   pending: '初始化中',
+  preparing: '准备中',
   running: '运行中',
   success: '已完成',
   failed: '失败',
@@ -81,6 +82,14 @@ const label = computed(() => labelMap[props.status] || props.status)
     background: rgba(114, 46, 209, 0.1);
     .status-badge__dot {
       background: #722ed1;
+      animation: pulse 1s infinite;
+    }
+  }
+  &--preparing {
+    color: #d48806;
+    background: rgba(212, 136, 6, 0.1);
+    .status-badge__dot {
+      background: #d48806;
       animation: pulse 1s infinite;
     }
   }

@@ -65,8 +65,8 @@ export const useExecutionStore = defineStore('execution', () => {
       targetRps.value = executionState.targetRps
       clearCharts()
 
-      if (executionState.status === 'pending') {
-        // pending 阶段：轮询初始化进度，等待转 running
+      if (executionState.status === 'pending' || executionState.status === 'preparing') {
+        // pending/preparing 阶段：轮询初始化与脚本部署进度，等待转 running
         _startInitPoller(executionState.id)
       } else {
         // 直接 running（理论上不会，但保留兼容）
@@ -99,7 +99,7 @@ export const useExecutionStore = defineStore('execution', () => {
         if (s.status === 'running') {
           _stopInitPoller()
           startTimers(executionId)
-        } else if (s.status !== 'pending') {
+        } else if (s.status !== 'pending' && s.status !== 'preparing') {
           // stopped / failed during init
           _stopInitPoller()
         }
@@ -232,7 +232,7 @@ export const useExecutionStore = defineStore('execution', () => {
     targetRps.value = s.targetRps
     if (s.status === 'running') {
       startTimers(executionId)
-    } else if (s.status === 'pending') {
+    } else if (s.status === 'pending' || s.status === 'preparing') {
       _startInitPoller(executionId)
     }
     // success / failed / stopped：仅展示终态，不启动轮询

@@ -17,8 +17,19 @@ export interface PageResult<T> {
 }
 
 // 状态枚举
-export type TaskStatus = 'idle' | 'pending' | 'running' | 'success' | 'failed' | 'stopped' | 'circuit_broken'
+export type TaskStatus = 'idle' | 'pending' | 'preparing' | 'running' | 'success' | 'failed' | 'stopped' | 'circuit_broken'
 export type ScriptLanguage = 'go' | 'python' | 'javascript'
+
+// 脚本部署状态（preparing 阶段展示）
+export type ScriptStatus = 'pending' | 'downloading' | 'ready' | 'failed'
+
+export interface ScriptStatusInfo {
+  scriptId: string
+  scriptName: string
+  commitHash: string
+  artifactUrl: string
+  status: ScriptStatus
+}
 
 // 用户
 export interface UserInfo {
@@ -146,6 +157,8 @@ export interface ExecutionRecord {
   durationSec?: number        // 实际执行时长（秒）
   errorMsg?: string
   reportId?: string           // 若已生成报告，可直接跳转
+  // preparing 阶段各脚本部署进度
+  scriptStatuses?: ScriptStatusInfo[]
 }
 
 // 初始化步骤（pending 阶段展示）
@@ -174,6 +187,8 @@ export interface ExecutionState {
   scriptSnapshots?: ScriptSnapshot[]
   // pending 阶段初始化步骤
   initSteps?: InitStep[]
+  // preparing 阶段各脚本部署进度
+  scriptStatuses?: ScriptStatusInfo[]
   // 压测完成后关联的报告 ID（用于自动跳转）
   reportId?: string
 }

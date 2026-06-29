@@ -28,7 +28,7 @@
           开始压测
         </el-button>
         <el-button
-          v-if="executionStatus === 'pending' || executionStatus === 'running'"
+          v-if="executionStatus === 'pending' || executionStatus === 'preparing' || executionStatus === 'running'"
           type="danger"
           :icon="VideoPause"
           size="large"
@@ -42,10 +42,12 @@
       </div>
     </div>
 
-    <!-- Pending: 初始化面板 -->
-    <div v-if="executionStatus === 'pending'" class="init-panel">
+    <!-- Pending/Preparing: 初始化面板 -->
+    <div v-if="executionStatus === 'pending' || executionStatus === 'preparing'" class="init-panel">
       <div class="init-panel__header">
-        <span class="init-panel__title">正在初始化压测环境...</span>
+        <span class="init-panel__title">
+          {{ executionStatus === 'preparing' ? '正在部署脚本到 Worker...' : '正在初始化压测环境...' }}
+        </span>
         <span class="init-panel__hint">即将开始注入流量，请稍候</span>
       </div>
       <div class="init-steps">
@@ -80,10 +82,43 @@
           </div>
         </div>
       </div>
+
+      <!-- 脚本部署进度 -->
+      <div v-if="executionStore.state?.scriptStatuses?.length" class="script-deploy">
+        <div class="script-deploy__title">脚本部署</div>
+        <div class="script-deploy-list">
+          <div
+            v-for="s in executionStore.state.scriptStatuses"
+            :key="s.scriptId"
+            class="script-deploy-item"
+            :class="`script-deploy-item--${s.status}`"
+          >
+            <span class="script-deploy-item__icon">
+              <svg v-if="s.status === 'downloading'" class="spin-icon" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-dasharray="28 56" />
+              </svg>
+              <svg v-else-if="s.status === 'ready'" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15" />
+                <path d="M7 12.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <svg v-else-if="s.status === 'failed'" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15" />
+                <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4" />
+              </svg>
+            </span>
+            <span class="script-deploy-item__name">{{ s.scriptName }}</span>
+            <code class="script-deploy-item__hash">{{ s.commitHash.slice(0, 8) }}</code>
+            <span class="script-deploy-item__status">({{ scriptStatusLabel(s.status) }})</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Summary Metrics（running 及之后才显示） -->
-    <template v-if="executionStatus !== 'pending' && executionStatus !== 'idle'">
+    <template v-if="executionStatus !== 'pending' && executionStatus !== 'preparing' && executionStatus !== 'idle'">
       <div class="metrics-summary">
         <MetricCard
           label="当前 RPS"
@@ -289,7 +324,7 @@ import ErrorRateChart from '@/components/charts/ErrorRateChart.vue'
 import ConcurrentChart from '@/components/charts/ConcurrentChart.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { formatNumber, formatMs, formatPercent, formatDuration } from '@/utils/format'
-import type { TaskStatus, PercentileData } from '@/types'
+import type { TaskStatus, PercentileData, ScriptStatus } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -451,8 +486,8 @@ watch(() => executionStore.logs.length, async () => {
 })
 
 watch(executionStatus, (status, prevStatus) => {
-  // 仅在从 pending 转 running 时提示（排除刷新恢复时 null→running 的误触发）
-  if (status === 'running' && prevStatus === 'pending') {
+  // 仅在从 pending/preparing 转 running 时提示（排除刷新恢复时 null→running 的误触发）
+  if (status === 'running' && (prevStatus === 'pending' || prevStatus === 'preparing')) {
     ElMessage.success('环境初始化完成，开始注入流量')
   } else if (status === 'success') {
     ElMessage.success('压测完成，正在跳转报告...')
@@ -479,6 +514,16 @@ async function handleStop() {
 function goReport() {
   const reportId = executionStore.state?.reportId
   router.push(reportId ? `/report/${reportId}` : '/report')
+}
+
+function scriptStatusLabel(status: ScriptStatus): string {
+  const map: Record<ScriptStatus, string> = {
+    pending: '等待中',
+    downloading: '下载中...',
+    ready: '已就绪',
+    failed: '失败',
+  }
+  return map[status] || status
 }
 </script>
 
@@ -677,6 +722,71 @@ function goReport() {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+// ── 脚本部署进度 ───────────────────────────────────────────────────────
+.script-deploy {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid $border-color-light;
+
+  &__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: $text-primary;
+    margin-bottom: 14px;
+  }
+}
+
+.script-deploy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.script-deploy-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  padding: 8px 12px;
+  background: $bg-page;
+  border-radius: $border-radius-sm;
+
+  &__icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    svg { width: 18px; height: 18px; }
+  }
+
+  &__name {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-weight: 500;
+    color: $text-primary;
+  }
+
+  &__hash {
+    font-size: 11px;
+    background: $color-primary-light-9;
+    color: $color-primary;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  &__status {
+    color: $text-secondary;
+    font-size: 12px;
+  }
+
+  &--ready &__icon { color: $color-success; }
+  &--downloading &__icon { color: #d48806; }
+  &--failed &__icon { color: $color-danger; }
+  &--pending &__icon { color: $text-secondary; }
 }
 
 // ── 指标 & 图表区 ──────────────────────────────────────────────────────

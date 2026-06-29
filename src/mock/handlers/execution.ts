@@ -1,6 +1,6 @@
 import type { MockHandler } from '../types'
 import { ok, fail, pageResult } from '../types'
-import type { ExecutionState, MetricsSummary, LogEntry, ScenarioConfig, PercentileData, ErrorData } from '@/types'
+import type { ExecutionState, MetricsSummary, LogEntry, ScenarioConfig, PercentileData, ErrorData, ScriptStatusInfo } from '@/types'
 import type { ExecutionRecord as ExecutionHistoryRecord } from '@/types'
 import { mockTasks } from '../data/tasks'
 import { mockScripts } from '../data/scripts'
@@ -47,6 +47,10 @@ const mockExecutionHistory: ExecutionHistoryRecord[] = [
     endTime: '2026-03-14T14:10:00Z',
     durationSec: 600,
     reportId: 'report001',
+    scriptStatuses: [
+      { scriptId: 'script001', scriptName: 'sdk-refactor-demo', commitHash: 'sdk_refactor', artifactUrl: 'cos://jarvan4/scripts/script001/sdk_refactor.so', status: 'ready' },
+      { scriptId: 'script002', scriptName: 'login-flow', commitHash: 'a1b2c3d4', artifactUrl: 'cos://jarvan4/scripts/script002/a1b2c3d4.so', status: 'ready' },
+    ],
   },
   {
     id: 'exec003',
@@ -59,6 +63,9 @@ const mockExecutionHistory: ExecutionHistoryRecord[] = [
     durationSec: 330,
     reportId: 'report002',
     errorMsg: '错误率超过阈值，系统过载',
+    scriptStatuses: [
+      { scriptId: 'script003', scriptName: 'home-page', commitHash: 'e5f6a7b8', artifactUrl: 'cos://jarvan4/scripts/script003/e5f6a7b8.so', status: 'ready' },
+    ],
   },
   {
     id: 'exec006',
@@ -70,6 +77,10 @@ const mockExecutionHistory: ExecutionHistoryRecord[] = [
     endTime: '2026-03-19T09:03:00Z',
     durationSec: 180,
     reportId: 'report003',
+    scriptStatuses: [
+      { scriptId: 'script001', scriptName: 'sdk-refactor-demo', commitHash: 'sdk_refactor', artifactUrl: 'cos://jarvan4/scripts/script001/sdk_refactor.so', status: 'ready' },
+      { scriptId: 'script004', scriptName: 'search-stress', commitHash: '9c8d7e6f', artifactUrl: 'cos://jarvan4/scripts/script004/9c8d7e6f.so', status: 'ready' },
+    ],
   },
 ]
 
@@ -315,6 +326,18 @@ export const executionHandlers: MockHandler[] = [
         }
       })
 
+      // 脚本部署状态（preparing 阶段展示，初始全部 pending）
+      const scriptStatuses: ScriptStatusInfo[] = scriptSnapshots.map(s => {
+        const scriptData = mockScripts.find(ms => ms.id === s.scriptId)
+        return {
+          scriptId: s.scriptId,
+          scriptName: s.scriptName,
+          commitHash: s.commitHash,
+          artifactUrl: scriptData?.artifactUrl || '',
+          status: 'pending' as const,
+        }
+      })
+
       // 初始化步骤（pending 阶段）
       const initSteps = [
         { key: 'select_worker', label: '选定可用 Worker 节点', status: 'waiting' as const, detail: '' },
@@ -336,6 +359,7 @@ export const executionHandlers: MockHandler[] = [
           targetRps: scenarioConfig.targetRps,
           scriptSnapshots,
           initSteps,
+          scriptStatuses,
         },
         startTime: Date.now(),
         logOffset: 0,
@@ -362,22 +386,27 @@ export const executionHandlers: MockHandler[] = [
         if (!r || r.execution.status !== 'pending') return
         r.execution.initSteps![0] = { key: 'select_worker', label: '选定可用 Worker 节点', status: 'done', detail: `已选定 ${pickedWorkers.length} 个节点`, items: workerItems }
         r.execution.initSteps![1] = { key: 'download_script', label: '下发脚本产物到 Worker', status: 'running', detail: '' }
+        // 进入 preparing 阶段：脚本开始下载
+        r.execution.status = 'preparing'
+        r.execution.scriptStatuses!.forEach(s => { s.status = 'downloading' })
       }, 700)
       setTimeout(() => {
         const r = executions.get(id)
-        if (!r || r.execution.status !== 'pending') return
+        if (!r || r.execution.status !== 'preparing') return
         r.execution.initSteps![1] = { key: 'download_script', label: '下发脚本产物到 Worker', status: 'done', detail: `${scriptNames.length} 个脚本`, items: scriptNames.length ? scriptNames : ['（无绑定脚本）'] }
         r.execution.initSteps![2] = { key: 'load_plugin', label: '加载脚本插件（plugin.Open）', status: 'running', detail: '' }
+        // 脚本下载完成
+        r.execution.scriptStatuses!.forEach(s => { s.status = 'ready' })
       }, 1400)
       setTimeout(() => {
         const r = executions.get(id)
-        if (!r || r.execution.status !== 'pending') return
+        if (!r || r.execution.status !== 'preparing') return
         r.execution.initSteps![2] = { key: 'load_plugin', label: '加载脚本插件（plugin.Open）', status: 'done', detail: '全部 Worker 加载成功' }
         r.execution.initSteps![3] = { key: 'inject_start', label: '开始注入流量', status: 'running', detail: '' }
       }, 2000)
       setTimeout(() => {
         const r = executions.get(id)
-        if (!r || r.execution.status !== 'pending') return
+        if (!r || r.execution.status !== 'preparing') return
         r.execution.initSteps![3] = { key: 'inject_start', label: '开始注入流量', status: 'done', detail: '' }
         r.execution.status = 'running'
         r.startTime = Date.now()  // running 计时从此刻开始
@@ -498,6 +527,7 @@ export const executionHandlers: MockHandler[] = [
             durationSec: rec.execution.endTime && rec.execution.startTime
               ? Math.round((new Date(rec.execution.endTime).getTime() - new Date(rec.execution.startTime).getTime()) / 1000)
               : undefined,
+            scriptStatuses: rec.execution.scriptStatuses,
           })
         }
       })
