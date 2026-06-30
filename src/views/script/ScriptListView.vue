@@ -56,7 +56,7 @@
           <template #default="{ row }">
             <a
               v-if="row.sourceRepo && row.sourcePath"
-              :href="`${row.sourceRepo}/-/blob/main/${row.sourcePath}`"
+              :href="buildSourceUrl(row.sourceRepo, row.sourcePath)"
               target="_blank"
               rel="noopener noreferrer"
               class="source-link"
@@ -176,6 +176,12 @@ const deleteVisible = ref(false)
 const deletingScript = ref<Script | null>(null)
 
 onMounted(() => loadScripts())
+
+// 构建源码链接 URL（GitHub 用 /blob/，cnb.cool 用 /-/blob/）
+function buildSourceUrl(repo: string, path: string): string {
+  const prefix = repo.includes('github.com') ? '/blob/main/' : '/-/blob/main/'
+  return `${repo}${prefix}${path}`
+}
 
 async function loadScripts() {
   await scriptStore.fetchList({ page: currentPage.value, pageSize: pageSize.value, keyword: keyword.value })
