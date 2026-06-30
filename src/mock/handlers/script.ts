@@ -68,7 +68,17 @@ export const scriptHandlers: MockHandler[] = [
       if (existing) {
         // 更新最新版本
         const idx = scripts.indexOf(existing)
-        scripts[idx] = { ...existing, commitHash: data.commitHash, artifactUrl: data.artifactUrl, commitMsg: data.commitMsg, author: data.author, updatedAt: now }
+        scripts[idx] = {
+          ...existing,
+          commitHash: data.commitHash,
+          artifactUrl: data.artifactUrl,
+          commitMsg: data.commitMsg,
+          author: data.author,
+          // CI 发布回调透传的源码信息（可选字段，未传则保留原值）
+          sourceRepo: data.sourceRepo ?? existing.sourceRepo,
+          sourcePath: data.sourcePath ?? existing.sourcePath,
+          updatedAt: now,
+        }
         // 插入版本历史
         if (!mockVersionHistory[existing.id]) mockVersionHistory[existing.id] = []
         mockVersionHistory[existing.id].unshift({ commitHash: data.commitHash, artifactUrl: data.artifactUrl, commitMsg: data.commitMsg, author: data.author, createdAt: now })
@@ -83,6 +93,8 @@ export const scriptHandlers: MockHandler[] = [
           artifactUrl: data.artifactUrl,
           commitMsg: data.commitMsg,
           author: data.author,
+          sourceRepo: data.sourceRepo,
+          sourcePath: data.sourcePath,
           createdAt: now,
           updatedAt: now,
         }

@@ -52,6 +52,23 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="源码" width="110" align="center">
+          <template #default="{ row }">
+            <a
+              v-if="row.sourceRepo && row.sourcePath"
+              :href="`${row.sourceRepo}/-/blob/main/${row.sourcePath}`"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="source-link"
+              @click.stop
+            >
+              <el-icon><Link /></el-icon>
+              <span>查看源码</span>
+            </a>
+            <span v-else class="source-empty">-</span>
+          </template>
+        </el-table-column>
+
         <el-table-column label="发布时间" width="160">
           <template #default="{ row }">
             <span class="time-text">{{ formatTime(row.updatedAt) }}</span>
@@ -292,6 +309,23 @@ async function doDelete() {
 .time-text {
   font-size: 13px;
   color: $text-secondary;
+}
+
+.source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: $color-primary;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.source-empty {
+  color: $text-placeholder;
 }
 
 // Drawer

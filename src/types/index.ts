@@ -135,6 +135,10 @@ export interface Script {
   artifactUrl: string      // 对象存储 .so 路径
   commitMsg: string        // commit message
   author: string           // 提交者
+  // 源码仓库信息（CI 发布时透传），用于在前端展示"查看源码"链接
+  // 链接 URL 规则：`${sourceRepo}/-/blob/main/${sourcePath}`（适配 cnb.cool / GitHub 等）
+  sourceRepo?: string      // 仓库地址，如 https://cnb.cool/group/repo
+  sourcePath?: string      // 脚本在仓库中的相对路径，如 scripts/http_login/main.go
   updatedAt: string
   createdAt: string
 }
