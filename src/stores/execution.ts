@@ -112,6 +112,10 @@ export const useExecutionStore = defineStore('execution', () => {
         const res = await request.get(`/executions/${executionId}`)
         const s: ExecutionState = res.data.data
         state.value = s
+
+        // 检查是否有脚本部署失败
+        const hasFailedScript = s.scriptStatuses?.some(sc => sc.status === 'failed')
+
         if (s.status === 'running') {
           // 后端直接转 running（兼容旧流程）
           _stopInitPoller()
@@ -119,14 +123,17 @@ export const useExecutionStore = defineStore('execution', () => {
         } else if (s.status === 'prepared') {
           // 部署完成，等用户手动 startRun，停止轮询
           _stopInitPoller()
+        } else if (s.status === 'failed' || hasFailedScript) {
+          // 部署失败，停止轮询
+          _stopInitPoller()
         } else if (s.status !== 'pending' && s.status !== 'preparing') {
-          // stopped / failed during init
+          // stopped / circuit_broken during init
           _stopInitPoller()
         }
       } catch (e) {
         console.error('[execution] init poller error', e)
       }
-    }, 300)
+    }, 500)
   }
 
   function _stopInitPoller() {
