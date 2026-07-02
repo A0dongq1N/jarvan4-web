@@ -48,7 +48,7 @@
         >
           停止
         </el-button>
-        <el-button v-if="executionStatus === 'success'" type="success" :icon="Document" @click="goReport">
+        <el-button v-if="executionStatus === 'success' || executionStatus === 'stopped'" type="success" :icon="Document" @click="goReport">
           查看报告
         </el-button>
       </div>
@@ -552,6 +552,8 @@ watch(executionStatus, (status, prevStatus) => {
     ElMessage.success('压测完成，正在跳转报告...')
     const reportId = executionStore.state?.reportId
     router.push(reportId ? `/report/${reportId}` : '/report')
+  } else if (status === 'stopped') {
+    ElMessage.warning('压测已停止')
   } else if (status === 'failed') {
     ElMessage.error('压测失败')
   }

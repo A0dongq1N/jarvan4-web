@@ -97,6 +97,13 @@ export const useExecutionStore = defineStore('execution', () => {
     if (!state.value) return
     await request.post(`/executions/${state.value.id}/stop`)
     stopTimers()
+    // 刷新状态，获取最终状态和 reportId
+    try {
+      const res = await request.get(`/executions/${state.value.id}`)
+      state.value = res.data.data
+    } catch (e) {
+      console.error('[execution] refresh after stop error', e)
+    }
   }
 
   async function fetchState(executionId: string) {
