@@ -268,6 +268,7 @@
                       style="width: 180px; margin: 0 12px"
                       show-input
                       input-size="small"
+                      @change="(val: number | number[]) => onWeightChange(s.scriptId, Array.isArray(val) ? val[0] : val)"
                     />
                   </div>
                   <el-button size="small" @click="openEnvEditor(s)">环境变量</el-button>
@@ -670,6 +671,17 @@ async function selectScript(script: any) {
   form.scripts = [...(taskStore.currentTask?.scripts || [])]
   showScriptSelector.value = false
   ElMessage.success(`已绑定 ${script.name}`)
+}
+
+async function onWeightChange(scriptId: string, weight: number) {
+  if (!task.value) return
+  try {
+    await taskStore.updateScriptWeight(task.value.id, scriptId, weight)
+    form.scripts = [...(taskStore.currentTask?.scripts || [])]
+    ElMessage.success('权重已保存')
+  } catch (e) {
+    ElMessage.error('权重保存失败')
+  }
 }
 
 async function unbindScript(scriptId: string) {

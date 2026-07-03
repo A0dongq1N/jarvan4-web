@@ -64,10 +64,15 @@ export const useTaskStore = defineStore('task', () => {
     await fetchById(taskId)
   }
 
+  async function updateScriptWeight(taskId: string, scriptId: string, weight: number) {
+    await request.put(`/tasks/${taskId}/scripts/${scriptId}/weight`, { weight })
+    await fetchById(taskId)
+  }
+
   async function unbindScript(taskId: string, scriptId: string) {
     await request.delete(`/tasks/${taskId}/scripts/${scriptId}`)
     await fetchById(taskId)
   }
 
-  return { list, total, currentTask, loading, fetchList, fetchById, createTask, updateTask, updateScene, deleteTask, bindScript, unbindScript, updateScriptEnvVars }
+  return { list, total, currentTask, loading, fetchList, fetchById, createTask, updateTask, updateScene, deleteTask, bindScript, unbindScript, updateScriptEnvVars, updateScriptWeight }
 })
