@@ -132,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, MoreFilled, Monitor, VideoPlay } from '@element-plus/icons-vue'
 import request from '@/utils/request'
@@ -213,6 +213,22 @@ async function handleCommand(cmd: string, w: WorkerNode) {
 onMounted(() => {
   load()
   timer = setInterval(load, 5000)
+})
+
+// keep-alive 缓存组件时，onUnmounted 不触发
+// 用 onDeactivated/onActivated 管理定时器
+onActivated(() => {
+  if (!timer) {
+    load()
+    timer = setInterval(load, 5000)
+  }
+})
+
+onDeactivated(() => {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
 })
 
 onUnmounted(() => {
