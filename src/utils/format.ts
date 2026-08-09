@@ -1,6 +1,7 @@
 /**
  * 格式化时间戳
  */
+import { correctedNow } from './serverClock'
 export function formatTime(ts: number | string | Date, format = 'YYYY-MM-DD HH:mm:ss'): string {
   const d = new Date(ts)
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -54,9 +55,7 @@ export function formatBytes(bytes: number): string {
 export function formatMs(ms: number): string {
   if (!ms || ms === 0) return '0 ms'
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`
-  if (ms >= 1) return `${ms.toFixed(1)} ms`
-  if (ms >= 0.01) return `${ms.toFixed(2)} ms`
-  return `${ms.toFixed(3)} ms`
+  return `${ms.toFixed(2)} ms`
 }
 
 /**
@@ -70,8 +69,36 @@ export function formatPercent(value: number, decimals = 2): string {
  * 相对时间（几分钟前）
  */
 export function timeAgo(ts: number | string): string {
-  const diff = Date.now() - new Date(ts).getTime()
-  const minutes = Math.floor(diff / 60000)
+  return formatRelativeAgo(ts, 'verbose')
+}
+
+export type RelativeAgoStyle = 'verbose' | 'compact'
+
+/**
+ * 心跳距今展示（秒数由服务端计算）
+ */
+export function formatHeartbeatAgo(sec: number): string {
+  const safe = Math.max(0, Math.floor(sec))
+  if (safe < 60) return safe <= 0 ? '刚刚' : `${safe}s 前`
+  return `${Math.floor(safe / 60)}m 前`
+}
+
+/**
+ * 相对时间。用服务端时钟校准，并对 diff 做下限钳制，避免前后端时间不一致出现负值。
+ */
+export function formatRelativeAgo(ts: number | string, style: RelativeAgoStyle = 'verbose'): string {
+  const targetMs = new Date(ts).getTime()
+  if (Number.isNaN(targetMs)) return '--'
+
+  const diffMs = Math.max(0, correctedNow() - targetMs)
+  const sec = Math.floor(diffMs / 1000)
+
+  if (style === 'compact') {
+    if (sec < 60) return sec <= 0 ? '刚刚' : `${sec}s 前`
+    return `${Math.floor(sec / 60)}m 前`
+  }
+
+  const minutes = Math.floor(diffMs / 60000)
   if (minutes < 1) return '刚刚'
   if (minutes < 60) return `${minutes}分钟前`
   const hours = Math.floor(minutes / 60)

@@ -28,6 +28,27 @@
       </div>
     </div>
 
+    <!-- 全局调度设置 -->
+    <div class="scheduling-settings">
+      <div class="scheduling-settings__info">
+        <div class="scheduling-settings__title">调度配额</div>
+        <div class="scheduling-settings__desc">
+          每核 RPS 系数 × CPU 核数 = 节点自报配额；与「单 Worker 上限」取 min 后用于调度加权分配
+        </div>
+      </div>
+      <div class="scheduling-settings__controls">
+        <div class="scheduling-settings__field">
+          <span class="scheduling-settings__label">每核 RPS 系数</span>
+          <el-input-number v-model="rpsPerCore" :min="50" :max="5000" :step="50" />
+        </div>
+        <div class="scheduling-settings__field">
+          <span class="scheduling-settings__label">单 Worker 上限</span>
+          <el-input-number v-model="maxRpsPerWorker" :min="100" :max="100000" :step="100" />
+        </div>
+        <el-button type="primary" :loading="savingScheduling" @click="saveScheduling">保存</el-button>
+      </div>
+    </div>
+
     <!-- 筛选栏 -->
     <div class="worker-toolbar">
       <el-radio-group v-model="statusFilter" @change="load">
@@ -117,12 +138,22 @@
             />
             <span class="metric__value">{{ w.currentConcurrency }} / {{ w.maxConcurrency }}</span>
           </div>
+          <div class="metric">
+            <div class="metric__label">调度 RPS 配额</div>
+            <span class="metric__value metric__value--quota">
+              {{ w.effectiveMaxRps ?? '—' }}
+              <span v-if="w.declaredMaxRps && w.declaredMaxRps !== w.effectiveMaxRps" class="metric__sub">
+                / 自报 {{ w.declaredMaxRps }}
+              </span>
+            </span>
+          </div>
         </div>
 
         <!-- 底部：CPU 核数 + 心跳时间 -->
         <div class="worker-card__footer">
           <span>{{ w.cpuCores }} 核 / {{ w.memTotalGb }} GB</span>
-          <span>心跳 {{ heartbeatAgo(w.lastHeartbeat) }}</span>
+          <span v-if="w.pluginAbiVersion">ABI v{{ w.pluginAbiVersion }}<template v-if="w.workerBuildId"> · {{ w.workerBuildId }}</template></span>
+          <span>心跳 {{ formatHeartbeatAgo(heartbeatDisplaySec(w)) }}</span>
         </div>
       </div>
 
@@ -133,17 +164,56 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { notifyError, notifySuccess, getErrorMessage } from '@/utils/feedback'
 import { Refresh, MoreFilled, Monitor, VideoPlay } from '@element-plus/icons-vue'
 import request from '@/utils/request'
+import { formatHeartbeatAgo } from '@/utils/format'
 import type { WorkerNode, WorkerStatus } from '@/types'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
 const workers = ref<WorkerNode[]>([])
 const loading = ref(false)
+const maxRpsPerWorker = ref(2000)
+const rpsPerCore = ref(300)
+const savingScheduling = ref(false)
 const statusFilter = ref('')
+const workersFetchedAt = ref(0)
+const nowTick = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | null = null
+let tickTimer: ReturnType<typeof setInterval> | null = null
+
+// 心跳间隔内维持最近一次非零 CPU/内存，避免轮询间隙展示为 0
+const metricCache = new Map<string, { cpuUsage: number; memUsage: number }>()
+
+function applyStickyMetrics(list: WorkerNode[]): WorkerNode[] {
+  return list.map((w) => {
+    const cached = metricCache.get(w.workerId)
+    let cpuUsage = w.cpuUsage
+    let memUsage = w.memUsage
+
+    if (w.status === 'offline') {
+      metricCache.delete(w.workerId)
+      return w
+    }
+
+    if (cpuUsage > 0) {
+      const next = { cpuUsage, memUsage: memUsage > 0 ? memUsage : (cached?.memUsage ?? 0) }
+      metricCache.set(w.workerId, next)
+      return { ...w, ...next }
+    }
+    if (memUsage > 0) {
+      const next = { cpuUsage: cached?.cpuUsage ?? 0, memUsage }
+      metricCache.set(w.workerId, next)
+      return { ...w, ...next }
+    }
+    if (cached) {
+      return { ...w, cpuUsage: cached.cpuUsage, memUsage: cached.memUsage }
+    }
+    return w
+  })
+}
 
 const stats = computed(() => {
   const all = workers.value
@@ -162,9 +232,36 @@ async function load() {
     const params: Record<string, string> = { pageSize: '100' }
     if (statusFilter.value) params.status = statusFilter.value
     const res = await request.get('/workers', { params })
-    workers.value = res.data.data.list
+    workers.value = applyStickyMetrics(res.data.data.list)
+    workersFetchedAt.value = Date.now()
+    nowTick.value = workersFetchedAt.value
   } finally {
     loading.value = false
+  }
+}
+
+async function loadScheduling() {
+  try {
+    const res = await request.get('/settings/scheduling')
+    maxRpsPerWorker.value = res.data.data.maxRpsPerWorker || 2000
+    rpsPerCore.value = res.data.data.rpsPerCore || 300
+  } catch {
+    // 使用默认值
+  }
+}
+
+async function saveScheduling() {
+  savingScheduling.value = true
+  try {
+    await request.put('/settings/scheduling', {
+      maxRpsPerWorker: maxRpsPerWorker.value,
+      rpsPerCore: rpsPerCore.value,
+    })
+    notifySuccess('调度配额已更新', '保存成功')
+  } catch (e) {
+    notifyError(getErrorMessage(e), '保存失败')
+  } finally {
+    savingScheduling.value = false
   }
 }
 
@@ -191,10 +288,33 @@ function concurrencyPct(w: WorkerNode) {
   return Math.min(100, Math.round(w.currentConcurrency / w.maxConcurrency * 100))
 }
 
-function heartbeatAgo(ts: string) {
-  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-  if (sec < 60) return `${sec}s 前`
-  return `${Math.floor(sec / 60)}m 前`
+function heartbeatDisplaySec(w: WorkerNode) {
+  const elapsed = workersFetchedAt.value
+    ? Math.max(0, Math.floor((nowTick.value - workersFetchedAt.value) / 1000))
+    : 0
+  return w.heartbeatAgoSec + elapsed
+}
+
+function startTimers() {
+  if (!timer) {
+    timer = setInterval(load, 5000)
+  }
+  if (!tickTimer) {
+    tickTimer = setInterval(() => {
+      nowTick.value = Date.now()
+    }, 1000)
+  }
+}
+
+function stopTimers() {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+  if (tickTimer) {
+    clearInterval(tickTimer)
+    tickTimer = null
+  }
 }
 
 async function handleCommand(cmd: string, w: WorkerNode) {
@@ -205,14 +325,15 @@ async function handleCommand(cmd: string, w: WorkerNode) {
       type: 'warning',
     })
     await request.post(`/workers/${w.workerId}/offline`)
-    ElMessage.success('节点已下线')
+    notifySuccess(`节点 ${w.hostname} 已下线`)
     load()
   }
 }
 
 onMounted(() => {
   load()
-  timer = setInterval(load, 5000)
+  loadScheduling()
+  startTimers()
 })
 
 // keep-alive 缓存组件时，onUnmounted 不触发
@@ -220,19 +341,16 @@ onMounted(() => {
 onActivated(() => {
   if (!timer) {
     load()
-    timer = setInterval(load, 5000)
+    startTimers()
   }
 })
 
 onDeactivated(() => {
-  if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
+  stopTimers()
 })
 
 onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  stopTimers()
 })
 </script>
 
@@ -247,6 +365,57 @@ onUnmounted(() => {
   gap: 12px;
   margin-bottom: 20px;
   flex-wrap: wrap;
+}
+
+.scheduling-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  background: $bg-card;
+  border-radius: $border-radius;
+  box-shadow: $shadow-sm;
+  border: 1px solid $border-color-light;
+
+  &__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  &__desc {
+    font-size: 12px;
+    color: $text-secondary;
+    margin-top: 4px;
+  }
+
+  &__control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  &__controls {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &__label {
+    font-size: 12px;
+    color: $text-secondary;
+  }
 }
 
 .stat-card {

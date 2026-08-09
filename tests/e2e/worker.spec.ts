@@ -56,6 +56,9 @@ test.describe('Worker — 节点管理', () => {
       expect(w).toHaveProperty('memUsage')
       expect(w).toHaveProperty('currentConcurrency')
       expect(w).toHaveProperty('lastHeartbeat')
+      expect(w).toHaveProperty('heartbeatAgoSec')
+      expect(typeof w.heartbeatAgoSec).toBe('number')
+      expect(w.heartbeatAgoSec).toBeGreaterThanOrEqual(0)
       expect(['online', 'busy', 'offline']).toContain(w.status)
     }
   })

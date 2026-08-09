@@ -17,6 +17,7 @@ export const mockWorkers: WorkerNode[] = [
     runningRunId: 'exec002',
     runningTaskName: '搜索接口阶梯压测',
     lastHeartbeat: new Date(Date.now() - 3000).toISOString(),
+    heartbeatAgoSec: 3,
   },
   {
     id: '2',
@@ -34,6 +35,7 @@ export const mockWorkers: WorkerNode[] = [
     runningRunId: 'exec002',
     runningTaskName: '搜索接口阶梯压测',
     lastHeartbeat: new Date(Date.now() - 2000).toISOString(),
+    heartbeatAgoSec: 2,
   },
   {
     id: '3',
@@ -51,6 +53,7 @@ export const mockWorkers: WorkerNode[] = [
     runningRunId: 'exec002',
     runningTaskName: '搜索接口阶梯压测',
     lastHeartbeat: new Date(Date.now() - 4000).toISOString(),
+    heartbeatAgoSec: 4,
   },
   {
     id: '4',
@@ -66,6 +69,7 @@ export const mockWorkers: WorkerNode[] = [
     memUsage: 12.4,
     currentConcurrency: 0,
     lastHeartbeat: new Date(Date.now() - 6000).toISOString(),
+    heartbeatAgoSec: 6,
   },
   {
     id: '5',
@@ -81,6 +85,7 @@ export const mockWorkers: WorkerNode[] = [
     memUsage: 11.9,
     currentConcurrency: 0,
     lastHeartbeat: new Date(Date.now() - 8000).toISOString(),
+    heartbeatAgoSec: 8,
   },
   {
     id: '6',
@@ -96,5 +101,6 @@ export const mockWorkers: WorkerNode[] = [
     memUsage: 0,
     currentConcurrency: 0,
     lastHeartbeat: new Date(Date.now() - 180000).toISOString(),
+    heartbeatAgoSec: 180,
   },
 ]

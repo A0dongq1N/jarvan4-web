@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { syncServerClock } from './serverClock'
 
 const request = axios.create({
   baseURL: '/api',
@@ -22,7 +23,10 @@ request.interceptors.request.use(
 
 // 响应拦截器
 request.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    syncServerClock(response.headers?.date)
+    return response
+  },
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('stress_token')

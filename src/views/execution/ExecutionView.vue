@@ -1,5 +1,12 @@
 <template>
   <div class="execution-view">
+    <ExecutionStepper
+      :status="executionStatus"
+      :has-report="!!executionStore.state?.reportId"
+      :deploy-done="deployDone"
+      :traffic-started="trafficStarted"
+    />
+
     <!-- Control Panel -->
     <div class="execution-control">
       <div class="execution-control__info">
@@ -9,27 +16,38 @@
           <span v-if="executionStore.state && executionStatus === 'running'" class="execution-control__elapsed">
             {{ formatDuration(executionStore.state.elapsedSeconds) }}
           </span>
-          <!-- RPS 模式徽章 -->
           <span v-if="executionStore.scenarioMode === 'rps' && executionStatus === 'running'" class="rps-badge">
             RPS 模式 &nbsp;目标: {{ executionStore.targetRps }} req/s
           </span>
         </div>
+        <p v-if="showStartHint" class="execution-control__hint">
+          将先部署脚本到 Worker，部署完成后开始注入流量
+        </p>
       </div>
 
       <div class="execution-control__actions">
         <el-button
-          v-if="executionStatus === 'idle' || executionStatus === 'success' || executionStatus === 'failed' || executionStatus === 'stopped'"
+          v-if="canStartDeploy"
           type="primary"
           :icon="VideoPlay"
           size="large"
           :loading="executionStore.loading"
           @click="handleStart"
         >
-          开始压测
+          {{ startStressLabel }}
         </el-button>
-        <!-- prepared: 部署完成，手动触发开始压测（醒目大按钮） -->
         <el-button
-          v-if="executionStatus === 'prepared'"
+          v-if="isDeploying"
+          type="primary"
+          :icon="VideoPlay"
+          size="large"
+          loading
+          disabled
+        >
+          压测准备中...
+        </el-button>
+        <el-button
+          v-if="executionStatus === 'prepared' && hasDeployedScripts"
           type="primary"
           :icon="VideoPlay"
           size="large"
@@ -37,30 +55,97 @@
           :loading="executionStore.loading"
           @click="handleStartRun"
         >
-          开始压测
+          开始注入流量
         </el-button>
         <el-button
-          v-if="executionStatus === 'pending' || executionStatus === 'preparing' || executionStatus === 'prepared' || executionStatus === 'running'"
+          v-if="canStop"
           type="danger"
           :icon="VideoPause"
           size="large"
           @click="handleStop"
         >
-          停止
+          {{ stopButtonLabel }}
         </el-button>
-        <el-button v-if="executionStatus === 'success' || executionStatus === 'stopped'" type="success" :icon="Document" @click="goReport">
+        <el-button
+          v-if="executionStatus === 'success' || executionStatus === 'stopped' || executionStatus === 'circuit_broken'"
+          type="success"
+          size="large"
+          :icon="Document"
+          @click="goReport"
+        >
           查看报告
         </el-button>
       </div>
     </div>
 
-    <!-- Pending/Preparing: 初始化面板 -->
-    <div v-if="executionStatus === 'pending' || executionStatus === 'preparing'" class="init-panel">
+    <!-- 失败原因（运行期失败；准备阶段失败由 init-panel 展示） -->
+    <el-alert
+      v-if="executionStatus === 'failed' && executionStore.state?.errorMsg && !isDeployFailure"
+      type="error"
+      :title="executionStore.state.errorMsg"
+      show-icon
+      :closable="false"
+      class="execution-error-alert"
+    />
+
+    <!-- 流量注入启动失败（保持 prepared，可修复后重试） -->
+    <el-alert
+      v-if="executionStatus === 'prepared' && injectBlockError"
+      type="error"
+      show-icon
+      :closable="false"
+      class="execution-error-alert"
+      title="流量注入启动失败"
+      :description="injectBlockError"
+    />
+    <el-alert
+      v-else-if="executionStatus === 'prepared' && executionStore.state?.errorMsg"
+      type="error"
+      show-icon
+      :closable="false"
+      class="execution-error-alert"
+      title="流量注入启动失败"
+      :description="executionStore.state.errorMsg"
+    />
+
+    <!-- 部署阶段 -->
+    <section v-if="showDeployZone" class="phase-panel">
+      <div class="phase-panel__header">
+        <h3 class="phase-panel__title">{{ deployPhaseTitle }}</h3>
+        <span class="phase-panel__subtitle">{{ deployPhaseSubtitle }}</span>
+      </div>
+
+      <el-alert
+        v-if="!hasTaskScripts && canStartDeploy"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="deploy-block-alert"
+        title="未绑定压测脚本"
+        description="请先在任务详情的「脚本绑定」页签中添加脚本，否则无法完成部署。"
+      />
+
+      <el-alert
+        v-if="deployBlockError"
+        type="error"
+        show-icon
+        :closable="false"
+        class="deploy-block-alert"
+        :title="deployBlockError"
+      />
+
+    <!-- Pending/Preparing/DeployFailed: 初始化面板 -->
+    <div v-if="executionStatus === 'pending' || executionStatus === 'preparing' || isDeployFailure" class="init-panel">
       <div class="init-panel__header">
         <span class="init-panel__title">
-          {{ executionStatus === 'preparing' ? '正在部署脚本到 Worker...' : '正在初始化压测环境...' }}
+          <template v-if="isDeployFailure">{{ deployFailureTitle }}</template>
+          <template v-else-if="executionStatus === 'preparing'">正在部署脚本到 Worker...</template>
+          <template v-else>正在准备执行环境...</template>
         </span>
-        <span class="init-panel__hint">即将开始注入流量，请稍候</span>
+        <span class="init-panel__hint">
+          <template v-if="isDeployFailure">请根据失败原因调整任务配置或扩容节点后，点击「再次压测」重试</template>
+          <template v-else>部署完成后需确认才会开始注入流量</template>
+        </span>
       </div>
       <div class="init-steps">
         <div
@@ -96,8 +181,8 @@
       </div>
     </div>
 
-    <!-- Prepared: 部署完成待执行 -->
-    <div v-if="executionStatus === 'prepared'" class="prepared-panel">
+    <!-- Prepared: 部署完成待注入 -->
+    <div v-if="executionStatus === 'prepared' && hasDeployedScripts" class="prepared-panel">
       <div class="prepared-panel__icon">
         <svg viewBox="0 0 24 24" fill="none">
           <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15" />
@@ -105,9 +190,58 @@
         </svg>
       </div>
       <div class="prepared-panel__text">
-        <div class="prepared-panel__title">脚本部署完成，点击开始压测</div>
+        <div class="prepared-panel__title">脚本部署完成，可开始注入流量</div>
         <div class="prepared-panel__hint">
-          已选定 Worker 节点并加载脚本插件，等待手动触发流量注入
+          已选定 {{ executionStore.state?.workerSnapshots?.length || 0 }} 个 Worker 节点并加载脚本插件，确认后才会开始发压。
+          超过 15 分钟未开始注入流量将自动取消并释放 Worker。
+        </div>
+        <div v-if="executionStore.state?.workerSnapshots?.length" class="prepared-panel__workers">
+          <span v-for="w in executionStore.state.workerSnapshots" :key="w.workerId" class="prepared-panel__worker-tag">
+            <code>{{ w.ip }}</code>
+            <span class="prepared-panel__worker-spec">{{ workerSpecLabel(w) }}</span>
+          </span>
+        </div>
+        <div v-if="scenePlan" class="scene-plan">
+          <div class="scene-plan__title">本次压测计划</div>
+          <div class="scene-plan__summary">{{ scenePlanSummary }}</div>
+          <div v-if="scenePlan.scripts?.length && scenePlan.mode === 'rps'" class="scene-plan__section">
+            <span class="scene-plan__label">脚本目标 RPS</span>
+            <div class="scene-plan__tags">
+              <span v-for="s in scenePlan.scripts" :key="s.scriptName" class="scene-plan__tag">
+                {{ s.scriptName }} · {{ s.targetRps }} RPS
+              </span>
+            </div>
+          </div>
+          <div v-else-if="scenePlan.scripts && scenePlan.scripts.length > 1" class="scene-plan__section">
+            <span class="scene-plan__label">脚本流量权重</span>
+            <div class="scene-plan__tags">
+              <span v-for="s in scenePlan.scripts" :key="s.scriptName" class="scene-plan__tag">
+                {{ s.scriptName }} · 权重 {{ s.weight }}
+              </span>
+            </div>
+          </div>
+          <div v-if="scenePlan.workers?.length && scenePlan.mode === 'rps'" class="scene-plan__section">
+            <span class="scene-plan__label">节点分配</span>
+            <div class="scene-plan__tags">
+              <span v-for="w in scenePlan.workers" :key="w.addr" class="scene-plan__tag">
+                {{ w.addr }} · 分配 {{ w.assignedRps }} RPS
+                <template v-if="w.effectiveQuota">（配额 {{ w.effectiveQuota }}）</template>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="prepared-panel__options">
+          <el-checkbox v-model="autoInject">部署完成后自动开始注入流量</el-checkbox>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prepared 但无脚本：不应出现，防御性提示 -->
+    <div v-if="executionStatus === 'prepared' && !hasDeployedScripts" class="prepared-panel prepared-panel--warn">
+      <div class="prepared-panel__text">
+        <div class="prepared-panel__title">未检测到已部署脚本</div>
+        <div class="prepared-panel__hint">
+          当前执行未绑定压测脚本，无法注入流量。请返回任务详情绑定脚本后重新执行。
         </div>
       </div>
     </div>
@@ -118,7 +252,7 @@
       class="script-deploy"
     >
       <div class="script-deploy__header">
-        <span class="script-deploy__title">脚本部署</span>
+        <span class="script-deploy__title">部署明细</span>
         <span class="script-deploy__summary" :class="scriptDeploySummaryClass">{{ scriptDeploySummary }}</span>
       </div>
       <div class="script-deploy-list">
@@ -156,10 +290,23 @@
               <span class="script-deploy-item__label">artifact:</span>
               <code class="script-deploy-item__artifact">{{ s.artifactUrl || '-' }}</code>
             </div>
-            <div class="script-deploy-item__row">
-              <span class="script-deploy-item__label">状态:</span>
-              <span class="script-deploy-item__status">{{ scriptStatusLabel(s.status) }}</span>
+          </div>
+          <div v-if="s.workers?.length" class="script-deploy-workers">
+            <div class="script-deploy-workers__title">节点部署</div>
+            <div
+              v-for="w in s.workers"
+              :key="w.workerId"
+              class="script-deploy-worker"
+              :class="`script-deploy-worker--${w.status}`"
+            >
+              <span class="script-deploy-worker__addr">{{ w.addr }}</span>
+              <span class="script-deploy-worker__status">{{ scriptStatusLabel(w.status) }}</span>
+              <span v-if="w.status === 'failed' && w.error" class="script-deploy-worker__error">{{ w.error }}</span>
             </div>
+          </div>
+          <div v-else class="script-deploy-item__row script-deploy-item__row--fallback">
+            <span class="script-deploy-item__label">状态:</span>
+            <span class="script-deploy-item__status">{{ scriptStatusLabel(s.status) }}</span>
           </div>
           <div v-if="s.status === 'failed' && s.error" class="script-deploy-item__error">
             错误: {{ s.error }}
@@ -167,8 +314,16 @@
         </div>
       </div>
     </div>
+    </section>
 
-    <!-- Summary Metrics（running 及之后才显示，prepared 不显示） -->
+    <!-- 流量注入阶段 -->
+    <section v-if="showStressZone" class="phase-panel">
+      <div class="phase-panel__header">
+        <h3 class="phase-panel__title">流量注入监控</h3>
+        <span class="phase-panel__subtitle">实时观测压测指标、接口表现与错误分析</span>
+      </div>
+
+    <!-- Summary Metrics（running 及之后才显示） -->
     <template v-if="executionStatus !== 'pending' && executionStatus !== 'preparing' && executionStatus !== 'prepared' && executionStatus !== 'idle'">
       <div class="metrics-summary">
         <MetricCard
@@ -225,8 +380,24 @@
           @current-change="handleApiChange"
         >
           <el-table-column label="接口" prop="api" min-width="200" />
+          <el-table-column label="脚本" prop="scriptName" width="120" />
           <el-table-column label="请求数" prop="requests" width="100">
             <template #default="{ row }">{{ formatNumber(row.requests, 0) }}</template>
+          </el-table-column>
+          <el-table-column label="实际 RPS" width="100">
+            <template #default="{ row }">{{ row.actualRps ? row.actualRps.toFixed(1) : '-' }}</template>
+          </el-table-column>
+          <el-table-column v-if="executionStore.scenarioMode === 'rps'" label="目标 RPS" width="100">
+            <template #default="{ row }">{{ row.targetRps ? row.targetRps.toFixed(1) : '-' }}</template>
+          </el-table-column>
+          <el-table-column v-if="executionStore.scenarioMode === 'rps'" label="相差" width="100">
+            <template #default="{ row }">
+              <span v-if="row.rpsGap !== undefined" :style="{ color: row.rpsGap > 0 ? '#e54545' : row.rpsGap < 0 ? '#00a870' : '#869archc' }">
+                {{ row.rpsGap > 0 ? '-' : '+' }}{{ Math.abs(row.rpsGap).toFixed(1) }}
+                ({{ Math.abs(row.rpsGapPercent).toFixed(1) }}%)
+              </span>
+              <span v-else>-</span>
+            </template>
           </el-table-column>
           <el-table-column label="错误数" prop="errors" width="90">
             <template #default="{ row }">
@@ -241,29 +412,29 @@
             </template>
           </el-table-column>
           <el-table-column label="P50" prop="p50" width="75">
-            <template #default="{ row }">{{ row.p50 }} ms</template>
+            <template #default="{ row }">{{ formatMs(row.p50) }}</template>
           </el-table-column>
           <el-table-column label="P75" prop="p75" width="75">
-            <template #default="{ row }">{{ row.p75 }} ms</template>
+            <template #default="{ row }">{{ formatMs(row.p75) }}</template>
           </el-table-column>
           <el-table-column label="P90" prop="p90" width="75">
-            <template #default="{ row }">{{ row.p90 }} ms</template>
+            <template #default="{ row }">{{ formatMs(row.p90) }}</template>
           </el-table-column>
           <el-table-column label="P95" prop="p95" width="75">
-            <template #default="{ row }">{{ row.p95 }} ms</template>
+            <template #default="{ row }">{{ formatMs(row.p95) }}</template>
           </el-table-column>
           <el-table-column label="P99" prop="p99" width="80">
             <template #default="{ row }">
               <span :style="{ color: row.p99 > 1000 ? '#e54545' : row.p99 > 500 ? '#ff9c19' : '#00a870' }">
-                {{ row.p99 }} ms
+                {{ formatMs(row.p99) }}
               </span>
             </template>
           </el-table-column>
           <el-table-column label="最大" prop="max" width="80">
-            <template #default="{ row }">{{ row.max }} ms</template>
+            <template #default="{ row }">{{ formatMs(row.max) }}</template>
           </el-table-column>
           <el-table-column label="最小" prop="min" width="75">
-            <template #default="{ row }">{{ row.min }} ms</template>
+            <template #default="{ row }">{{ formatMs(row.min) }}</template>
           </el-table-column>
         </el-table>
 
@@ -357,6 +528,7 @@
         </div>
       </div>
     </template>
+    </section>
   </div>
 </template>
 
@@ -368,6 +540,7 @@ import { VideoPlay, VideoPause, Document, Delete } from '@element-plus/icons-vue
 import { useExecutionStore } from '@/stores/execution'
 import { useTaskStore } from '@/stores/task'
 import StatusBadge from '@/components/common/StatusBadge.vue'
+import ExecutionStepper from '@/components/execution/ExecutionStepper.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
 import RpsChart from '@/components/charts/RpsChart.vue'
 import ResponseTimeChart from '@/components/charts/ResponseTimeChart.vue'
@@ -375,18 +548,25 @@ import ErrorRateChart from '@/components/charts/ErrorRateChart.vue'
 import ConcurrentChart from '@/components/charts/ConcurrentChart.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { formatNumber, formatMs, formatPercent, formatDuration } from '@/utils/format'
-import type { TaskStatus, PercentileData, ScriptStatus } from '@/types'
+import { sparseLineSymbol } from '@/utils/chart'
+import type { TaskStatus, PercentileData, ScriptStatus, WorkerSnapshot } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const executionStore = useExecutionStore()
 const taskStore = useTaskStore()
 
+const AUTO_INJECT_KEY = 'jarvan4_execution_auto_inject'
+
 const taskId = computed(() => route.params.taskId as string)
 const taskName = ref('加载中...')
+const taskScriptCount = ref(0)
+const deployBlockError = ref('')
+const injectBlockError = ref('')
 const logLevelFilter = ref('')
 const autoScroll = ref(true)
 const logContainer = ref<HTMLElement | null>(null)
+const autoInject = ref(localStorage.getItem(AUTO_INJECT_KEY) === 'true')
 
 // 当前选中接口行（点击展开趋势图）
 const selectedApi = ref<PercentileData | null>(null)
@@ -414,6 +594,108 @@ watch(
 
 const executionStatus = computed<TaskStatus>(() => executionStore.state?.status || 'idle')
 
+const trafficStarted = computed(() => {
+  const s = executionStore.state
+  if (!s) return false
+  return !!s.startTime || s.elapsedSeconds > 0 || s.status === 'running' || s.status === 'success'
+})
+
+const deployDone = computed(() => {
+  const s = executionStore.state
+  if (!s) return false
+  if (['prepared', 'running', 'success'].includes(s.status)) return true
+  if (trafficStarted.value) return true
+  const statuses = s.scriptStatuses
+  return !!(statuses?.length && statuses.every(st => st.status === 'ready'))
+})
+
+const scenePlan = computed(() => executionStore.state?.scenePlan)
+
+const scenePlanSummary = computed(() => {
+  const plan = scenePlan.value
+  if (!plan) return ''
+  const duration = plan.durationSec ? ` · 总时长 ${plan.durationSec}s` : ''
+  if (plan.mode === 'rps') {
+    return `RPS 阶梯爬升 · 峰值 ${plan.peakRps ?? executionStore.targetRps ?? '-'} req/s${duration}`
+  }
+  return `VU 阶梯爬升 · 峰值 ${plan.peakConcurrent ?? '-'} 并发${duration}`
+})
+
+function workerSpecLabel(w: WorkerSnapshot): string {
+  const base = `${w.cpuCores} 核 · ${w.memTotalGb?.toFixed(1) || '?'} GB · 最大并发 ${w.maxConcurrency}`
+  const planWorkers = scenePlan.value?.workers
+  if (planWorkers?.length) {
+    const match = planWorkers.find(pw => pw.addr === w.ip || pw.addr === w.hostname)
+    if (match?.assignedRps) {
+      return `${base} · 分配 ${match.assignedRps} RPS`
+    }
+  }
+  if (w.effectiveMaxRps) {
+    return `${base} · RPS 配额 ${w.effectiveMaxRps}`
+  }
+  return base
+}
+
+const hasTaskScripts = computed(() => taskScriptCount.value > 0)
+
+const isDeployFailure = computed(() =>
+  executionStatus.value === 'failed'
+  && !!executionStore.state?.errorMsg
+  && !(executionStore.state?.elapsedSeconds && executionStore.state.elapsedSeconds > 0)
+)
+
+const isCapacityDeployFailure = computed(() =>
+  isDeployFailure.value
+  && executionStore.state?.initSteps?.some(s => s.key === 'select_worker' && s.status === 'error')
+)
+
+const deployFailureTitle = computed(() =>
+  isCapacityDeployFailure.value ? '压测准备失败' : '脚本部署失败'
+)
+
+const deployPhaseTitle = computed(() =>
+  isCapacityDeployFailure.value ? '压测准备' : '脚本部署'
+)
+
+const deployPhaseSubtitle = computed(() =>
+  isCapacityDeployFailure.value
+    ? '校验集群容量与节点资源，通过后再分发脚本'
+    : '将脚本插件分发到 Worker 节点并完成加载'
+)
+
+const hasDeployedScripts = computed(() =>
+  (executionStore.state?.scriptStatuses?.length ?? 0) > 0
+    || (executionStore.state?.scriptSnapshots?.length ?? 0) > 0
+)
+
+const canStartDeploy = computed(() =>
+  ['idle', 'success', 'failed', 'stopped'].includes(executionStatus.value)
+)
+const isDeploying = computed(() =>
+  executionStatus.value === 'pending' || executionStatus.value === 'preparing'
+)
+const canStop = computed(() =>
+  ['pending', 'preparing', 'prepared', 'running'].includes(executionStatus.value)
+)
+const showDeployZone = computed(() =>
+  ['pending', 'preparing', 'prepared'].includes(executionStatus.value)
+  || isDeployFailure.value
+  || (canStartDeploy.value && !hasTaskScripts.value)
+)
+const showStressZone = computed(() =>
+  ['running', 'success', 'stopped', 'failed', 'circuit_broken'].includes(executionStatus.value)
+  && !isDeployFailure.value
+)
+const startStressLabel = computed(() =>
+  ['success', 'stopped', 'failed'].includes(executionStatus.value) ? '再次压测' : '开始压测'
+)
+const showStartHint = computed(() => canStartDeploy.value)
+const stopButtonLabel = computed(() => {
+  if (executionStatus.value === 'running') return '停止注入'
+  if (executionStatus.value === 'prepared') return '取消执行'
+  return '取消压测'
+})
+
 const filteredLogs = computed(() => {
   if (!logLevelFilter.value) return executionStore.logs
   return executionStore.logs.filter(l => l.level === logLevelFilter.value)
@@ -428,6 +710,8 @@ function errorRateClass(rate: number) {
 
 // ── 接口维度趋势图 ────────────────────────────────────────────────────
 function makeLineOption(data: { timestamp: number; value: number }[], color: string, yAxisFormatter?: (v: number) => string) {
+  const sym = sparseLineSymbol(data.length)
+  const tsLabel = (ts: number) => new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTimeString()
   const AXIS_COLOR  = '#babcbe'
   const SPLIT_COLOR = '#ececed'
   const LABEL_COLOR = '#9c9fa3'
@@ -436,7 +720,7 @@ function makeLineOption(data: { timestamp: number; value: number }[], color: str
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: data.map(p => new Date(p.timestamp).toLocaleTimeString()),
+      data: data.map(p => tsLabel(p.timestamp)),
       axisLabel: { color: LABEL_COLOR, fontSize: 11 },
       axisLine: { lineStyle: { color: AXIS_COLOR } },
       axisTick: { show: false },
@@ -454,12 +738,17 @@ function makeLineOption(data: { timestamp: number; value: number }[], color: str
       borderColor: '#e1e2e3',
       borderWidth: 1,
       textStyle: { color: '#22252b', fontSize: 12 },
+      formatter: yAxisFormatter ? (params: any) => {
+        const p = params[0]
+        return `<span style="color:#9c9fa3;font-size:11px">${p.axisValue}</span><br/><b style="color:${color}">${yAxisFormatter(p.value)}</b>`
+      } : undefined,
     },
     series: [{
       type: 'line',
       data: data.map(p => p.value),
       smooth: true,
-      symbol: 'none',
+      symbol: sym.symbol,
+      symbolSize: sym.symbolSize,
       lineStyle: { color, width: 2 },
       areaStyle: {
         color: {
@@ -475,13 +764,13 @@ function makeLineOption(data: { timestamp: number; value: number }[], color: str
 }
 
 const apiRpsChartOption = computed(() =>
-  selectedApi.value?.rpsData ? makeLineOption(selectedApi.value.rpsData, '#3871dc') : {}
+  selectedApi.value?.rpsData ? makeLineOption(selectedApi.value.rpsData, '#3871dc', v => String(Math.ceil(v))) : {}
 )
 const apiRtChartOption = computed(() =>
-  selectedApi.value?.responseTimeData ? makeLineOption(selectedApi.value.responseTimeData, '#ff7f40') : {}
+  selectedApi.value?.responseTimeData ? makeLineOption(selectedApi.value.responseTimeData, '#ff7f40', v => v.toFixed(2) + ' ms') : {}
 )
 const apiErrChartOption = computed(() =>
-  selectedApi.value?.errorRateData ? makeLineOption(selectedApi.value.errorRateData, '#e0226e', v => v.toFixed(1) + '%') : {}
+  selectedApi.value?.errorRateData ? makeLineOption(selectedApi.value.errorRateData, '#e0226e', v => v.toFixed(2) + '%') : {}
 )
 
 // ── 错误分析饼图 ──────────────────────────────────────────────────────
@@ -506,20 +795,33 @@ onMounted(async () => {
   try {
     const task = await taskStore.fetchById(taskId.value)
     taskName.value = task.name
+    taskScriptCount.value = task.scripts?.length ?? 0
   } catch {
     taskName.value = '未知任务'
   }
 
   const execId = route.query.execId as string | undefined
+  const autostart = route.query.autostart === '1'
 
   if (execId) {
     // 刷新恢复：已有执行 ID，重连到正在运行的执行，不清空状态
     await executionStore.resumeExecution(execId)
   } else {
-    // 全新进入：清空上次残留状态
-    executionStore.reset()
-    if (route.query.autostart === '1') {
-      await executionStore.startExecution(taskId.value)
+    const active = await executionStore.findActiveExecution(taskId.value)
+    if (active) {
+      await executionStore.resumeExecution(active.id)
+      router.replace({ path: route.path, query: { execId: active.id } })
+      if (autostart) {
+        ElMessage.info('已恢复进行中的压测')
+      }
+    } else {
+      executionStore.reset()
+      if (autostart) {
+        await executionStore.startExecution(taskId.value)
+        if (executionStore.state?.id) {
+          router.replace({ path: route.path, query: { execId: executionStore.state.id } })
+        }
+      }
     }
   }
 })
@@ -536,46 +838,90 @@ watch(() => executionStore.logs.length, async () => {
   }
 })
 
-watch(executionStatus, (status, prevStatus) => {
-  // pending/preparing → prepared：脚本部署完成
+watch(autoInject, (val) => {
+  localStorage.setItem(AUTO_INJECT_KEY, String(val))
+})
+
+watch(executionStatus, async (status, prevStatus) => {
   if (status === 'prepared' && (prevStatus === 'pending' || prevStatus === 'preparing')) {
-    ElMessage.success('脚本部署完成，等待开始压测')
-  }
-  // prepared → running：手动触发开始注入流量
-  else if (status === 'running' && prevStatus === 'prepared') {
-    ElMessage.success('开始注入流量')
-  }
-  // 兼容旧流程：pending/preparing 直接转 running
-  else if (status === 'running' && (prevStatus === 'pending' || prevStatus === 'preparing')) {
-    ElMessage.success('环境初始化完成，开始注入流量')
+    ElMessage.success('脚本部署完成，可开始注入流量')
+    if (autoInject.value) {
+      await handleStartRun()
+    }
+  } else if (status === 'running' && prevStatus === 'prepared') {
+    ElMessage.success('已开始注入流量')
+  } else if (status === 'running' && (prevStatus === 'pending' || prevStatus === 'preparing')) {
+    ElMessage.success('部署完成，已开始注入流量')
   } else if (status === 'success') {
-    ElMessage.success('压测完成，正在跳转报告...')
+    ElMessage.success('流量注入完成，正在跳转报告...')
     const reportId = executionStore.state?.reportId
     router.push(reportId ? `/report/${reportId}` : '/report')
   } else if (status === 'stopped') {
-    ElMessage.warning('压测已停止')
+    const msg = executionStore.state?.errorMsg
+    if (prevStatus === 'prepared' && msg) {
+      ElMessage.warning(msg)
+    } else if (prevStatus === 'prepared') {
+      ElMessage.warning('等待超时，已自动取消')
+    } else {
+      ElMessage.warning('流量注入已停止')
+    }
   } else if (status === 'failed') {
-    ElMessage.error('压测失败')
+    ElMessage.error(executionStore.state?.errorMsg || '执行失败')
+  } else if (status === 'circuit_broken') {
+    ElMessage.error(executionStore.state?.errorMsg || '熔断保护已触发，压测已自动停止')
   }
 })
 
 async function handleStart() {
-  await executionStore.startExecution(taskId.value)
-  // 把 execution ID 写入 URL，刷新后可恢复
-  if (executionStore.state?.id) {
-    router.replace({ query: { ...route.query, execId: executionStore.state.id, autostart: undefined } })
+  deployBlockError.value = ''
+  try {
+    const task = await taskStore.fetchById(taskId.value)
+    taskScriptCount.value = task.scripts?.length ?? 0
+    if (!taskScriptCount.value) {
+      const msg = '任务未绑定压测脚本，请先在任务详情 → 脚本绑定中添加脚本'
+      deployBlockError.value = msg
+      ElMessage.error(msg)
+      return
+    }
+    if (executionStatus.value !== 'idle') {
+      executionStore.reset()
+    }
+    await executionStore.startExecution(taskId.value)
+    if (executionStore.state?.id) {
+      router.replace({ query: { ...route.query, execId: executionStore.state.id, autostart: undefined } })
+    }
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { message?: string } } }
+    const msg = err?.response?.data?.message || '启动压测失败'
+    deployBlockError.value = msg
+    ElMessage.error(msg)
   }
 }
 
 // prepared → running：手动触发已部署的执行
 async function handleStartRun() {
   if (!executionStore.state?.id) return
-  await executionStore.startRun(executionStore.state.id)
+  injectBlockError.value = ''
+  try {
+    await executionStore.startRun(executionStore.state.id)
+    ElMessage.success('已开始注入流量')
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { message?: string } } }
+    const msg = err?.response?.data?.message || executionStore.state?.errorMsg || '流量注入启动失败'
+    injectBlockError.value = msg
+    ElMessage.error(msg)
+  }
 }
 
 async function handleStop() {
+  const prevStatus = executionStatus.value
   await executionStore.stopExecution()
-  ElMessage.info('已停止压测')
+  const msg = prevStatus === 'running'
+    ? '已停止流量注入'
+    : prevStatus === 'prepared'
+      ? '已取消执行'
+      : '已取消压测'
+  ElMessage.info(msg)
 }
 
 function goReport() {
@@ -597,6 +943,14 @@ function scriptStatusLabel(status: ScriptStatus): string {
 const scriptDeploySummary = computed(() => {
   const list = executionStore.state?.scriptStatuses ?? []
   if (!list.length) return ''
+  const hasWorkers = list.some(s => (s.workers?.length ?? 0) > 0)
+  if (hasWorkers) {
+    const total = list.reduce((n, s) => n + (s.workers?.length ?? 0), 0)
+    const ready = list.reduce((n, s) => n + (s.workers?.filter(w => w.status === 'ready').length ?? 0), 0)
+    const failed = list.reduce((n, s) => n + (s.workers?.filter(w => w.status === 'failed').length ?? 0), 0)
+    if (failed > 0) return `${ready}/${total} 节点已就绪，${failed} 失败`
+    return `${ready}/${total} 节点已就绪`
+  }
   const ready = list.filter(s => s.status === 'ready').length
   const failed = list.filter(s => s.status === 'failed').length
   const total = list.length
@@ -607,6 +961,15 @@ const scriptDeploySummary = computed(() => {
 const scriptDeploySummaryClass = computed(() => {
   const list = executionStore.state?.scriptStatuses ?? []
   if (!list.length) return ''
+  const hasWorkers = list.some(s => (s.workers?.length ?? 0) > 0)
+  if (hasWorkers) {
+    const total = list.reduce((n, s) => n + (s.workers?.length ?? 0), 0)
+    const ready = list.reduce((n, s) => n + (s.workers?.filter(w => w.status === 'ready').length ?? 0), 0)
+    const failed = list.reduce((n, s) => n + (s.workers?.filter(w => w.status === 'failed').length ?? 0), 0)
+    if (failed > 0) return 'script-deploy__summary--has-failed'
+    if (ready === total && total > 0) return 'script-deploy__summary--all-ready'
+    return ''
+  }
   const failed = list.filter(s => s.status === 'failed').length
   const ready = list.filter(s => s.status === 'ready').length
   if (failed > 0) return 'script-deploy__summary--has-failed'
@@ -621,6 +984,35 @@ const scriptDeploySummaryClass = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.execution-error-alert,
+.deploy-block-alert {
+  margin: 0;
+}
+
+.phase-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  &__header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  &__subtitle {
+    font-size: 13px;
+    color: $text-secondary;
+  }
 }
 
 .execution-control {
@@ -645,6 +1037,13 @@ const scriptDeploySummaryClass = computed(() => {
     gap: 12px;
   }
 
+  &__hint {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: $text-secondary;
+    line-height: 1.5;
+  }
+
   &__elapsed {
     font-size: 14px;
     color: $text-secondary;
@@ -654,6 +1053,7 @@ const scriptDeploySummaryClass = computed(() => {
 
   &__actions {
     display: flex;
+    align-items: center;
     gap: 12px;
   }
 }
@@ -720,6 +1120,87 @@ const scriptDeploySummaryClass = computed(() => {
   &__hint {
     font-size: 13px;
     color: $text-secondary;
+  }
+
+  &__workers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  &__worker-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: $bg-page;
+    border: 1px solid $border-color;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 12px;
+
+    code {
+      color: #08979c;
+      font-weight: 600;
+    }
+  }
+
+  &__worker-spec {
+    color: $text-secondary;
+  }
+
+  &__options {
+    margin-top: 8px;
+  }
+}
+
+.scene-plan {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: rgba(8, 151, 156, 0.06);
+  border: 1px solid rgba(8, 151, 156, 0.2);
+  border-radius: 8px;
+
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #08979c;
+    margin-bottom: 6px;
+  }
+
+  &__summary {
+    font-size: 14px;
+    font-weight: 500;
+    color: $text-primary;
+    margin-bottom: 8px;
+  }
+
+  &__section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  &__label {
+    font-size: 12px;
+    color: $text-secondary;
+  }
+
+  &__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  &__tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: $bg-page;
+    border: 1px solid $border-color;
+    border-radius: 4px;
+    font-size: 12px;
+    color: $text-primary;
   }
 }
 
@@ -1010,6 +1491,64 @@ const scriptDeploySummaryClass = computed(() => {
     border-left-color: $border-color-light;
     .script-deploy-item__icon { color: $text-secondary; }
   }
+
+  &__row--fallback {
+    margin-top: 4px;
+    margin-left: 28px;
+  }
+}
+
+.script-deploy-workers {
+  margin-top: 10px;
+  margin-left: 28px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: $border-radius-sm;
+  border: 1px solid $border-color-light;
+
+  &__title {
+    font-size: 12px;
+    font-weight: 600;
+    color: $text-secondary;
+    margin-bottom: 8px;
+  }
+}
+
+.script-deploy-worker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed $border-color-light;
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  &__addr {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    color: $text-primary;
+    min-width: 160px;
+  }
+
+  &__status {
+    color: $text-secondary;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__error {
+    flex: 1 1 100%;
+    color: $color-danger;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    word-break: break-all;
+  }
+
+  &--ready &__status { color: $color-success; font-weight: 600; }
+  &--downloading &__status { color: #d48806; font-weight: 600; }
+  &--failed &__status { color: $color-danger; font-weight: 600; }
 }
 
 // ── 指标 & 图表区 ──────────────────────────────────────────────────────

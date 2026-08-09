@@ -75,10 +75,12 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" plain @click.stop="openDetail(row)">版本历史</el-button>
-            <el-button size="small" type="danger" plain @click.stop="confirmDelete(row)">下线</el-button>
+            <div class="row-actions">
+              <el-button size="small" type="primary" plain @click.stop="openDetail(row)">版本历史</el-button>
+              <el-button size="small" type="danger" plain @click.stop="confirmDelete(row)">下线</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -237,6 +239,12 @@ async function doDelete() {
   border-top: 1px solid $border-color-light;
   display: flex;
   justify-content: flex-end;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .script-name {

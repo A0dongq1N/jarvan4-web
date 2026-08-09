@@ -146,7 +146,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search, SwitchButton, Delete } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { notifyError, notifySuccess, getErrorMessage } from '@/utils/feedback'
 import { useProjectStore } from '@/stores/project'
 import { useAuthStore } from '@/stores/auth'
 import type { Project } from '@/types'
@@ -181,9 +182,9 @@ async function handleDelete(project: Project) {
   )
   try {
     await projectStore.deleteProject(project.id)
-    ElMessage.success('项目已删除')
-  } catch {
-    ElMessage.error('删除失败，请重试')
+    notifySuccess(`项目「${project.name}」已删除`)
+  } catch (e) {
+    notifyError(getErrorMessage(e), '删除失败')
   }
 }
 
@@ -227,11 +228,11 @@ async function handleCreate() {
   creating.value = true
   try {
     await projectStore.createProject({ name: form.value.name, description: form.value.description || undefined })
-    ElMessage.success('项目创建成功')
+    notifySuccess(`项目「${form.value.name}」已创建`, '创建成功')
     showCreateDialog.value = false
     projectStore.fetchList({ keyword: keyword.value })
-  } catch {
-    ElMessage.error('创建失败，请重试')
+  } catch (e) {
+    notifyError(getErrorMessage(e), '创建失败')
   } finally {
     creating.value = false
   }

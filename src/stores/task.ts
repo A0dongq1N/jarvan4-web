@@ -47,10 +47,11 @@ export const useTaskStore = defineStore('task', () => {
     total.value--
   }
 
-  async function bindScript(taskId: string, scriptId: string, weight: number) {
+  async function bindScript(taskId: string, scriptId: string, weight: number, targetRps?: number) {
     await request.post(`/tasks/${taskId}/scripts`, {
       scriptId,
       weight,
+      targetRps: targetRps ?? weight,
     })
     await fetchById(taskId)
   }
@@ -64,6 +65,11 @@ export const useTaskStore = defineStore('task', () => {
     await fetchById(taskId)
   }
 
+  async function updateScriptTargetRps(taskId: string, scriptId: string, targetRps: number) {
+    await request.put(`/tasks/${taskId}/scripts/${scriptId}/target-rps`, { targetRps })
+    await fetchById(taskId)
+  }
+
   async function updateScriptWeight(taskId: string, scriptId: string, weight: number) {
     await request.put(`/tasks/${taskId}/scripts/${scriptId}/weight`, { weight })
     await fetchById(taskId)
@@ -74,5 +80,5 @@ export const useTaskStore = defineStore('task', () => {
     await fetchById(taskId)
   }
 
-  return { list, total, currentTask, loading, fetchList, fetchById, createTask, updateTask, updateScene, deleteTask, bindScript, unbindScript, updateScriptEnvVars, updateScriptWeight }
+  return { list, total, currentTask, loading, fetchList, fetchById, createTask, updateTask, updateScene, deleteTask, bindScript, unbindScript, updateScriptEnvVars, updateScriptWeight, updateScriptTargetRps }
 })

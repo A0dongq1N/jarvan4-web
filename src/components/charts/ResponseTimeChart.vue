@@ -12,6 +12,7 @@
 import { computed } from 'vue'
 import BaseChart from './BaseChart.vue'
 import type { MetricPoint } from '@/types'
+import { sparseLineSymbol, timeSeriesPairs, timeXAxis } from '@/utils/chart'
 
 const props = defineProps<{ data: MetricPoint[] }>()
 
@@ -20,16 +21,11 @@ const SPLIT_COLOR = '#ececed'
 const LABEL_COLOR = '#9c9fa3'
 const LINE_COLOR  = '#ff7f40'
 
-const option = computed(() => ({
+const option = computed(() => {
+  const sym = sparseLineSymbol(props.data.length)
+  return {
   grid: { top: 12, right: 16, bottom: 24, left: 52 },
-  xAxis: {
-    type: 'category',
-    boundaryGap: false,
-    data: props.data.map(p => new Date(p.timestamp).toLocaleTimeString()),
-    axisLine: { lineStyle: { color: AXIS_COLOR } },
-    axisTick: { show: false },
-    axisLabel: { color: LABEL_COLOR, fontSize: 11 },
-  },
+  xAxis: timeXAxis(),
   yAxis: {
     type: 'value',
     axisLine: { show: false },
@@ -45,16 +41,17 @@ const option = computed(() => ({
     textStyle: { color: '#22252b', fontSize: 12 },
     formatter: (params: any) => {
       const p = params[0]
-      const v = p.value ?? 0
-      const display = v >= 1 ? v.toFixed(1) : v >= 0.01 ? v.toFixed(2) : v.toFixed(3)
-      return `<span style="color:#9c9fa3;font-size:11px">${p.axisValue}</span><br/>响应时间 <b style="color:#ff7f40">${display} ms</b>`
+      const val = Array.isArray(p.value) ? p.value[1] : p.value
+      const time = Array.isArray(p.value) ? new Date(p.value[0]).toLocaleTimeString() : p.axisValue
+      return `<span style="color:#9c9fa3;font-size:11px">${time}</span><br/>响应时间 <b style="color:#ff7f40">${Number(val).toFixed(2)} ms</b>`
     },
   },
   series: [{
     type: 'line',
-    data: props.data.map(p => p.value),
+    data: timeSeriesPairs(props.data),
     smooth: true,
-    symbol: 'none',
+    symbol: sym.symbol,
+    symbolSize: sym.symbolSize,
     lineStyle: { color: LINE_COLOR, width: 2 },
     areaStyle: {
       color: {
@@ -66,7 +63,8 @@ const option = computed(() => ({
       },
     },
   }],
-}))
+  }
+})
 </script>
 
 <style lang="scss" scoped>

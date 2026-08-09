@@ -60,10 +60,17 @@
             {{ formatTime(row.startTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" @click="$router.push(`/report/${row.id}`)">详情</el-button>
-            <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
+            <div class="row-actions">
+              <el-button size="small" type="primary" @click="$router.push(`/report/${row.id}`)">详情</el-button>
+              <el-button
+                v-if="row.taskId"
+                size="small"
+                @click="$router.push({ path: `/task/${row.taskId}`, query: { tab: 'history' } })"
+              >任务</el-button>
+              <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -93,7 +100,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { Search } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { notifyError, notifySuccess, getErrorMessage } from '@/utils/feedback'
 import { useReportStore } from '@/stores/report'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
@@ -125,9 +132,13 @@ function confirmDelete(report: Report) {
 
 async function doDelete() {
   if (!deletingReport.value) return
-  await reportStore.deleteReport(deletingReport.value.id)
-  ElMessage.success('删除成功')
-  loadReports()
+  try {
+    await reportStore.deleteReport(deletingReport.value.id)
+    notifySuccess('报告已删除')
+    loadReports()
+  } catch (e) {
+    notifyError(getErrorMessage(e), '删除失败')
+  }
 }
 </script>
 
@@ -152,5 +163,13 @@ async function doDelete() {
   border-top: 1px solid $border-color-light;
   display: flex;
   justify-content: flex-end;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 </style>

@@ -21,7 +21,9 @@
       <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="handleSearch">
         <el-option label="全部状态" value="" />
         <el-option label="空闲" value="idle" />
-        <el-option label="运行中" value="running" />
+        <el-option label="部署中" value="preparing" />
+        <el-option label="部署完成" value="prepared" />
+        <el-option label="注入中" value="running" />
         <el-option label="已完成" value="success" />
         <el-option label="失败" value="failed" />
       </el-select>
@@ -60,27 +62,28 @@
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button
-              size="small"
-              type="primary"
-              :disabled="row.status === 'running'"
-              @click="goExecution(row.id)"
-            >执行</el-button>
-            <el-button size="small" @click="goDetail(row.id)">详情</el-button>
-            <el-dropdown size="small" @command="(cmd: string) => handleMore(cmd, row)">
-              <el-button size="small">
-                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item
-                    v-if="row.lastExecutionId"
-                    command="report"
-                  >查看报告</el-dropdown-item>
-                  <el-dropdown-item command="delete" style="color:#e0226e">删除</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <div class="row-actions">
+              <el-button
+                size="small"
+                type="primary"
+                @click="goExecution(row.id)"
+              >执行</el-button>
+              <el-button size="small" @click="goDetail(row.id)">详情</el-button>
+              <el-dropdown size="small" @command="(cmd: string) => handleMore(cmd, row)">
+                <el-button size="small">
+                  更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item
+                      v-if="row.lastExecutionId"
+                      command="report"
+                    >查看报告</el-dropdown-item>
+                    <el-dropdown-item command="delete" style="color:#e0226e">删除</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -133,7 +136,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search, ArrowDown } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { notifyError, notifySuccess, notifyWarning, getErrorMessage } from '@/utils/feedback'
 import { useTaskStore } from '@/stores/task'
 import { useReportStore } from '@/stores/report'
 import { useProjectStore } from '@/stores/project'
@@ -190,6 +193,10 @@ function modeLabel(mode: string) {
 }
 
 function openCreate() {
+  if (!projectStore.currentProject) {
+    notifyWarning('请先在顶部选择项目，再创建压测任务')
+    return
+  }
   editingTask.value = null
   taskForm.name = ''
   taskForm.description = ''
@@ -198,7 +205,7 @@ function openCreate() {
 
 async function handleSave() {
   if (!taskForm.name) {
-    ElMessage.warning('请输入任务名称')
+    notifyWarning('请输入任务名称')
     return
   }
   saving.value = true
@@ -206,11 +213,16 @@ async function handleSave() {
     if (editingTask.value) {
       await taskStore.updateTask(editingTask.value.id, taskForm)
     } else {
-      await taskStore.createTask(taskForm)
+      await taskStore.createTask({
+        ...taskForm,
+        projectId: projectStore.currentProject!.id,
+      })
     }
     drawerVisible.value = false
-    ElMessage.success('保存成功')
+    notifySuccess(editingTask.value ? '任务信息已更新' : '任务已创建', '保存成功')
     loadTasks()
+  } catch (e) {
+    notifyError(getErrorMessage(e), '保存失败')
   } finally {
     saving.value = false
   }
@@ -221,7 +233,7 @@ function goDetail(id: string) {
 }
 
 function goExecution(taskId: string) {
-  router.push(`/execution/${taskId}`)
+  router.push(`/execution/${taskId}?autostart=1`)
 }
 
 async function handleMore(cmd: string, task: StressTask) {
@@ -250,9 +262,13 @@ function confirmDelete(task: StressTask) {
 
 async function doDelete() {
   if (!deletingTask.value) return
-  await taskStore.deleteTask(deletingTask.value.id)
-  ElMessage.success('删除成功')
-  loadTasks()
+  try {
+    await taskStore.deleteTask(deletingTask.value.id)
+    notifySuccess(`任务「${deletingTask.value.name}」已删除`)
+    loadTasks()
+  } catch (e) {
+    notifyError(getErrorMessage(e), '删除失败')
+  }
 }
 </script>
 
@@ -285,6 +301,12 @@ async function doDelete() {
   font-size: 12px;
   color: $text-secondary;
   margin-top: 2px;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 // 场景模式 tag（按模式着色）

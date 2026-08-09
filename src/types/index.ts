@@ -24,6 +24,13 @@ export type ScriptLanguage = 'go' | 'python' | 'javascript'
 // 脚本部署状态（preparing 阶段展示）
 export type ScriptStatus = 'pending' | 'downloading' | 'ready' | 'failed'
 
+export interface WorkerScriptDeployStatus {
+  workerId: string
+  addr: string
+  status: ScriptStatus
+  error?: string
+}
+
 export interface ScriptStatusInfo {
   scriptId: string
   scriptName: string
@@ -31,6 +38,7 @@ export interface ScriptStatusInfo {
   artifactUrl: string
   status: ScriptStatus
   error?: string
+  workers?: WorkerScriptDeployStatus[]
 }
 
 // 用户
@@ -45,6 +53,7 @@ export interface UserInfo {
 // 任务相关
 export interface StressTask {
   id: string
+  projectId?: string
   name: string
   description?: string
   status: TaskStatus
@@ -62,11 +71,16 @@ export interface ScenarioConfig {
   duration: number      // 秒
   // 阶梯模式
   steps?: StepConfig[]
-  // RPS 固定模式
-  targetRps?: number
-  rpsRampTime?: number  // 固定速率爬坡时长（秒），0 = 立即起步
-  // RPS 阶梯模式
+  // RPS 阶梯模式（仅支持阶梯爬升）
+  rpsMode?: 'step'
   rpsSteps?: RpsStepConfig[]
+  /** @deprecated 旧固定速率字段，加载时自动迁移为 rpsSteps */
+  targetRps?: number
+  /** @deprecated 旧固定速率字段 */
+  rpsRampTime?: number
+  maxRpsPerWorker?: number // 单 Worker 最大 RPS（调度估算用，默认 2000）
+  // 场景级环境变量，执行时下发给 Worker，脚本通过 ctx.Vars.Env(key) 读取
+  envVars?: Record<string, string>
   // 熔断配置
   circuitBreaker?: CircuitBreakerConfig
 }
@@ -105,6 +119,7 @@ export interface TaskScript {
   scriptId: string
   scriptName: string
   weight: number
+  targetRps?: number
   // 运行时透传给脚本的环境变量，脚本通过 ctx.Vars.Env(key) 读取
   // 格式：{ "INTERFACE_WEIGHTS": "{\"search\":70,\"order\":30}", "BASE_URL": "..." }
   envVars?: Record<string, string>
@@ -122,7 +137,30 @@ export interface WorkerSnapshot {
   hostname: string
   ip: string
   cpuCores: number
+  memTotalGb: number
   maxConcurrency: number
+  effectiveMaxRps?: number
+}
+
+export interface ScenePlan {
+  mode: ScenarioMode
+  peakRps?: number
+  peakConcurrent?: number
+  durationSec?: number
+  scripts?: ScriptPlanItem[]
+  workers?: WorkerPlanItem[]
+}
+
+export interface ScriptPlanItem {
+  scriptName: string
+  targetRps?: number
+  weight?: number
+}
+
+export interface WorkerPlanItem {
+  addr: string
+  effectiveQuota?: number
+  assignedRps?: number
 }
 
 // 脚本相关
@@ -190,13 +228,18 @@ export interface ExecutionState {
   // 场景模式上下文（前端差异化展示用）
   scenarioMode?: ScenarioMode
   targetRps?: number
+  scenePlan?: ScenePlan
   scriptSnapshots?: ScriptSnapshot[]
   // pending 阶段初始化步骤
   initSteps?: InitStep[]
   // preparing 阶段各脚本部署进度
   scriptStatuses?: ScriptStatusInfo[]
+  // 选定的 Worker 节点
+  workerSnapshots?: WorkerSnapshot[]
   // 压测完成后关联的报告 ID（用于自动跳转）
   reportId?: string
+  errorMsg?: string
+  warningMsg?: string
 }
 
 export interface MetricPoint {
@@ -243,15 +286,18 @@ export interface Report {
   percentiles: PercentileData[]
   errors: ErrorData[]
   createdAt: string
+  errorMsg?: string
   // 场景模式（RPS 模式报告差异化展示用）
   scenarioMode?: ScenarioMode
   targetRps?: number
   scriptSnapshots?: ScriptSnapshot[]
   workerSnapshots?: WorkerSnapshot[]
+  scriptStatuses?: ScriptStatusInfo[]
 }
 
 export interface PercentileData {
   api: string
+  scriptName?: string  // 所属脚本名
   requests: number   // 该接口总请求数
   errors: number     // 该接口错误数
   errorRate: number  // 错误率（0-1）
@@ -266,9 +312,20 @@ export interface PercentileData {
   rpsData?:          MetricPoint[]
   responseTimeData?: MetricPoint[]
   errorRateData?:    MetricPoint[]
+  // RPS 达成率（前端计算）
+  peakRps?:        number  // 稳态 P95 峰值
+  steadyAvgRps?:   number  // 稳态平均 RPS（达成率/相差对比用）
+  avgRps?:         number  // 全程平均 RPS = requests / duration
+  actualRps?:      number  // 兼容旧字段，等同 avgRps
+  scriptTargetRps?: number // 脚本级目标 RPS（全局目标 × 权重占比）
+  targetRps?:      number  // 接口目标 RPS（脚本目标 × 请求数/脚本内最大请求数）
+  rpsGap?:         number  // 相差数 = target - 峰值（稳态 P95）
+  rpsGapPercent?:  number  // 相差百分比
 }
 
 export interface ErrorData {
+  // 关联接口（可选）
+  api?: string
   // 错误码：业务错误码（如 "10001"）或系统错误标识（如 "TIMEOUT"、"CONNECTION_REFUSED"）
   code:       string
   // 错误描述：脚本 ScriptError.Message 或 error.Error() 原始字符串
@@ -298,6 +355,11 @@ export interface WorkerNode {
   runningRunId?: string
   runningTaskName?: string
   lastHeartbeat: string
+  heartbeatAgoSec: number
+  pluginAbiVersion?: number
+  workerBuildId?: string
+  declaredMaxRps?: number
+  effectiveMaxRps?: number
 }
 
 // 项目

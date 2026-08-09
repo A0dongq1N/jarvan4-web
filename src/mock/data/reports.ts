@@ -65,9 +65,9 @@ export const mockReports: Report[] = [
       { scriptId: 'script003', scriptName: 'http_order', commitHash: 'c9d1e3f7a2b8', weight: 30 },
     ],
     workerSnapshots: [
-      { workerId: 'worker-node-01', hostname: 'stress-worker-01', ip: '10.0.1.11', cpuCores: 16, maxConcurrency: 5000 },
-      { workerId: 'worker-node-02', hostname: 'stress-worker-02', ip: '10.0.1.12', cpuCores: 16, maxConcurrency: 5000 },
-      { workerId: 'worker-node-03', hostname: 'stress-worker-03', ip: '10.0.1.13', cpuCores: 16, maxConcurrency: 5000 },
+      { workerId: 'worker-node-01', hostname: 'stress-worker-01', ip: '10.0.1.11', cpuCores: 16, memTotalGb: 32, maxConcurrency: 5000 },
+      { workerId: 'worker-node-02', hostname: 'stress-worker-02', ip: '10.0.1.12', cpuCores: 16, memTotalGb: 32, maxConcurrency: 5000 },
+      { workerId: 'worker-node-03', hostname: 'stress-worker-03', ip: '10.0.1.13', cpuCores: 16, memTotalGb: 32, maxConcurrency: 5000 },
     ],
   },
   {
@@ -125,8 +125,8 @@ export const mockReports: Report[] = [
       { scriptId: 'script001', scriptName: 'http_login', commitHash: 'a3f8c1d2e4b5', weight: 100 },
     ],
     workerSnapshots: [
-      { workerId: 'worker-node-04', hostname: 'stress-worker-04', ip: '10.0.1.14', cpuCores: 8, maxConcurrency: 2000 },
-      { workerId: 'worker-node-05', hostname: 'stress-worker-05', ip: '10.0.1.15', cpuCores: 8, maxConcurrency: 2000 },
+      { workerId: 'worker-node-04', hostname: 'stress-worker-04', ip: '10.0.1.14', cpuCores: 8, memTotalGb: 16, maxConcurrency: 2000 },
+      { workerId: 'worker-node-05', hostname: 'stress-worker-05', ip: '10.0.1.15', cpuCores: 8, memTotalGb: 16, maxConcurrency: 2000 },
     ],
   },
   {
@@ -210,8 +210,8 @@ export const mockReports: Report[] = [
       { scriptId: 'script001', scriptName: 'http_login', commitHash: 'a3f8c1d2e4b5', weight: 40 },
     ],
     workerSnapshots: [
-      { workerId: 'worker-node-04', hostname: 'stress-worker-04', ip: '10.0.1.14', cpuCores: 8, maxConcurrency: 2000 },
-      { workerId: 'worker-node-05', hostname: 'stress-worker-05', ip: '10.0.1.15', cpuCores: 8, maxConcurrency: 2000 },
+      { workerId: 'worker-node-04', hostname: 'stress-worker-04', ip: '10.0.1.14', cpuCores: 8, memTotalGb: 16, maxConcurrency: 2000 },
+      { workerId: 'worker-node-05', hostname: 'stress-worker-05', ip: '10.0.1.15', cpuCores: 8, memTotalGb: 16, maxConcurrency: 2000 },
     ],
   },
 ]

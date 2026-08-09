@@ -1,11 +1,23 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ExecutionState, MetricPoint, MetricsSummary, LogEntry, ScenarioMode, PercentileData, ErrorData } from '@/types'
+import type { ExecutionState, ExecutionRecord, MetricPoint, MetricsSummary, LogEntry, ScenarioMode, PercentileData, ErrorData } from '@/types'
 import request from '@/utils/request'
+import { enrichPercentilesWithTargetRps } from '@/utils/apiTargetRps'
+import { isActiveExecution } from '@/utils/execution'
 
 const WINDOW_SIZE = 60
+const LIVE_POLL_MS = 1000
 
-// ── per-API 滑动窗口（模块级，跨轮询周期积累；startPolling 时初始化，stopPolling 时清理）
+function normalizeTimestamp(ts: number): number {
+  // 后端时序为 Unix 秒，实时轮询为毫秒
+  return ts < 1e12 ? ts * 1000 : ts
+}
+
+function normalizeChartPoints(points: MetricPoint[] = []): MetricPoint[] {
+  return points.map(p => ({ timestamp: normalizeTimestamp(p.timestamp), value: p.value }))
+}
+
+// ── per-API 滑动窗口
 let apiRpsWindows  = new Map<string, MetricPoint[]>()
 let apiRtWindows   = new Map<string, MetricPoint[]>()
 let apiErrWindows  = new Map<string, MetricPoint[]>()
@@ -48,6 +60,7 @@ export const useExecutionStore = defineStore('execution', () => {
   let metricsTimer: ReturnType<typeof setInterval> | null = null
   let logTimer: ReturnType<typeof setInterval> | null = null
   let initTimer: ReturnType<typeof setInterval> | null = null
+  let preparedTimer: ReturnType<typeof setInterval> | null = null
 
   function pushPoint(arr: MetricPoint[], point: MetricPoint) {
     arr.push(point)
@@ -69,12 +82,15 @@ export const useExecutionStore = defineStore('execution', () => {
         // pending/preparing 阶段：轮询初始化与脚本部署进度，等待转 prepared
         _startInitPoller(executionState.id)
       } else if (executionState.status === 'prepared') {
-        // prepared：部署完成，等用户手动 startRun，不启动任何轮询
+        // prepared：等待用户 startRun，轮询以感知后端超时自动取消
         _stopInitPoller()
-      } else {
-        // 直接 running（理论上不会，但保留兼容）
+        _startPreparedPoller(executionState.id)
+      } else if (executionState.status === 'running') {
         startTimers(executionState.id)
+      } else {
+        _stopInitPoller()
       }
+      return executionState
     } finally {
       loading.value = false
     }
@@ -86,8 +102,16 @@ export const useExecutionStore = defineStore('execution', () => {
     try {
       const res = await request.post(`/executions/${executionId}/start`)
       state.value = res.data.data
-      // 转入 running，启动指标/日志轮询
+      _stopPreparedPoller()
       startTimers(executionId)
+      return res.data.data as ExecutionState
+    } catch (e) {
+      try {
+        await fetchState(executionId)
+      } catch {
+        // ignore refresh failure
+      }
+      throw e
     } finally {
       loading.value = false
     }
@@ -95,12 +119,14 @@ export const useExecutionStore = defineStore('execution', () => {
 
   async function stopExecution() {
     if (!state.value) return
-    await request.post(`/executions/${state.value.id}/stop`)
+    const executionId = state.value.id
+    await request.post(`/executions/${executionId}/stop`)
     stopTimers()
     // 刷新状态，获取最终状态和 reportId
     try {
-      const res = await request.get(`/executions/${state.value.id}`)
+      const res = await request.get(`/executions/${executionId}`)
       state.value = res.data.data
+      await loadHistoricalCharts(executionId)
     } catch (e) {
       console.error('[execution] refresh after stop error', e)
     }
@@ -128,8 +154,9 @@ export const useExecutionStore = defineStore('execution', () => {
           _stopInitPoller()
           startTimers(executionId)
         } else if (s.status === 'prepared') {
-          // 部署完成，等用户手动 startRun，停止轮询
+          // 部署完成，等用户手动 startRun
           _stopInitPoller()
+          _startPreparedPoller(executionId)
         } else if (s.status === 'failed' || hasFailedScript) {
           // 部署失败，停止轮询
           _stopInitPoller()
@@ -147,55 +174,176 @@ export const useExecutionStore = defineStore('execution', () => {
     if (initTimer) { clearInterval(initTimer); initTimer = null }
   }
 
-  async function _pollMetrics(executionId: string) {
+  function _startPreparedPoller(executionId: string) {
+    _stopPreparedPoller()
+    preparedTimer = setInterval(async () => {
+      try {
+        const res = await request.get(`/executions/${executionId}`)
+        const s: ExecutionState = res.data.data
+        state.value = s
+        if (s.status !== 'prepared') {
+          _stopPreparedPoller()
+        }
+      } catch (e) {
+        console.error('[execution] prepared poller error', e)
+      }
+    }, 5000)
+  }
+
+  function _stopPreparedPoller() {
+    if (preparedTimer) { clearInterval(preparedTimer); preparedTimer = null }
+  }
+
+  function applyChartData(chart: {
+    rpsData?: MetricPoint[]
+    responseTimeData?: MetricPoint[]
+    errorRateData?: MetricPoint[]
+    concurrentData?: MetricPoint[]
+  }): boolean {
+    if (!chart.rpsData?.length) return false
+    rpsData.value = normalizeChartPoints(chart.rpsData)
+    responseTimeData.value = normalizeChartPoints(chart.responseTimeData ?? [])
+    errorRateData.value = normalizeChartPoints(chart.errorRateData ?? [])
+    concurrentData.value = normalizeChartPoints(chart.concurrentData ?? [])
+    return true
+  }
+
+  function applyMetricsSnapshot(data: MetricsSummary) {
+    const ts = Date.now()
+    pushPoint(rpsData.value, { timestamp: ts, value: data.rps })
+    pushPoint(responseTimeData.value, { timestamp: ts, value: data.avgResponseTime })
+    pushPoint(errorRateData.value, { timestamp: ts, value: data.errorRate * 100 })
+    pushPoint(concurrentData.value, { timestamp: ts, value: data.concurrent })
+  }
+
+  function mergeLivePoint(points: MetricPoint[], value: number, ts = Date.now()): MetricPoint[] {
+    const next = [...points]
+    const last = next[next.length - 1]
+    // 与 1s 轮询对齐：1 秒内只更新最后一个点，避免曲线被刷得过密
+    if (last && ts - last.timestamp < 1000) {
+      next[next.length - 1] = { timestamp: ts, value }
+    } else {
+      next.push({ timestamp: ts, value })
+      if (next.length > WINDOW_SIZE) next.shift()
+    }
+    return next
+  }
+
+  function applyLiveMetricsToCharts(
+    chart: {
+      rpsData?: MetricPoint[]
+      responseTimeData?: MetricPoint[]
+      errorRateData?: MetricPoint[]
+      concurrentData?: MetricPoint[]
+    },
+    data: MetricsSummary,
+  ) {
+    const ts = Date.now()
+    if (chart.rpsData?.length) {
+      rpsData.value = mergeLivePoint(normalizeChartPoints(chart.rpsData), data.rps, ts)
+      responseTimeData.value = mergeLivePoint(
+        normalizeChartPoints(chart.responseTimeData ?? []),
+        data.avgResponseTime,
+        ts,
+      )
+      errorRateData.value = mergeLivePoint(
+        normalizeChartPoints(chart.errorRateData ?? []),
+        data.errorRate * 100,
+        ts,
+      )
+      concurrentData.value = mergeLivePoint(
+        normalizeChartPoints(chart.concurrentData ?? []),
+        data.concurrent,
+        ts,
+      )
+      return
+    }
+    if (data.rps > 0 || data.totalRequests > 0) {
+      applyMetricsSnapshot(data)
+    }
+  }
+
+  async function _pollLiveData(executionId: string) {
     try {
-      const res = await request.get(`/executions/${executionId}/metrics`)
-      const data = res.data.data
-      const ts = Date.now()
-      pushPoint(rpsData.value, { timestamp: ts, value: data.rps })
-      pushPoint(responseTimeData.value, { timestamp: ts, value: data.avgResponseTime })
-      pushPoint(errorRateData.value, { timestamp: ts, value: data.errorRate * 100 })
-      pushPoint(concurrentData.value, { timestamp: ts, value: data.concurrent })
+      const [metricsRes, chartRes, stateRes, apiRes] = await Promise.all([
+        request.get(`/executions/${executionId}/metrics`),
+        request.get(`/executions/${executionId}/chart-data`),
+        request.get(`/executions/${executionId}`),
+        request.get(`/executions/${executionId}/api-metrics`),
+      ])
+
+      const data = metricsRes.data.data
       summary.value = data
-      // refresh state
-      const stateRes = await request.get(`/executions/${executionId}`)
       state.value = stateRes.data.data
+
+      const chart = chartRes.data.data
+      applyLiveMetricsToCharts(chart, data)
+
+      const { percentiles, errors } = apiRes.data.data as { percentiles: PercentileData[]; errors: ErrorData[] }
+      _applyApiMetrics(percentiles, errors, percentiles.some(p => (p.rpsData?.length ?? 0) > 1))
+
       if (state.value!.status !== 'running') {
         stopTimers()
       }
     } catch (e) {
-      console.error('[execution] poll metrics error', e)
+      console.error('[execution] poll live data error', e)
     }
   }
 
-  async function _pollApiMetrics(executionId: string) {
+  async function loadHistoricalCharts(executionId: string) {
     try {
-      const res = await request.get(`/executions/${executionId}/api-metrics`)
-      const { percentiles, errors } = res.data.data as { percentiles: PercentileData[]; errors: ErrorData[] }
+      const [metricsRes, chartRes, apiRes] = await Promise.all([
+        request.get(`/executions/${executionId}/metrics`),
+        request.get(`/executions/${executionId}/chart-data`),
+        request.get(`/executions/${executionId}/api-metrics`),
+      ])
+      summary.value = metricsRes.data.data
+      const chart = chartRes.data.data
+      applyChartData(chart)
+      const { percentiles, errors } = apiRes.data.data as { percentiles: PercentileData[]; errors: ErrorData[] }
+      _applyApiMetrics(percentiles, errors, true)
+    } catch (e) {
+      console.error('[execution] load historical charts error', e)
+    }
+  }
 
-      // 将每个接口的当前点推入滑动窗口，并组装完整时序
-      const assembled: PercentileData[] = percentiles.map(p => {
+  function _applyApiMetrics(percentiles: PercentileData[], errors: ErrorData[], fromHistory = false) {
+    const elapsed = state.value?.elapsedSeconds || 0
+    const globalTargetRps = targetRps.value || 0
+    const snapshots = state.value?.scriptSnapshots || []
+
+    const assembled: PercentileData[] = percentiles.map(p => {
+      if (!fromHistory) {
         const rpsPoint   = p.rpsData?.[0]
         const rtPoint    = p.responseTimeData?.[0]
         const errPoint   = p.errorRateData?.[0]
-
         if (rpsPoint)  pushApiPoint(apiRpsWindows,  p.api, rpsPoint)
         if (rtPoint)   pushApiPoint(apiRtWindows,   p.api, rtPoint)
         if (errPoint)  pushApiPoint(apiErrWindows,  p.api, errPoint)
+      }
 
-        return {
-          ...p,
-          rpsData:          [...(apiRpsWindows.get(p.api)  ?? [])],
-          responseTimeData: [...(apiRtWindows.get(p.api)   ?? [])],
-          errorRateData:    [...(apiErrWindows.get(p.api)  ?? [])],
-        }
-      })
+      const rpsSeries = fromHistory
+        ? normalizeChartPoints(p.rpsData)
+        : [...(apiRpsWindows.get(p.api) ?? [])]
+      const rtSeries = fromHistory
+        ? normalizeChartPoints(p.responseTimeData)
+        : [...(apiRtWindows.get(p.api) ?? [])]
+      const errSeries = fromHistory
+        ? normalizeChartPoints(p.errorRateData)
+        : [...(apiErrWindows.get(p.api) ?? [])]
 
-      livePercentiles.value = assembled
-      liveErrors.value = errors
-    } catch (e) {
-      console.error('[execution] poll api-metrics error', e)
-    }
+      return {
+        ...p,
+        rpsData:          rpsSeries,
+        responseTimeData: rtSeries,
+        errorRateData:    errSeries,
+      }
+    })
+
+    livePercentiles.value = scenarioMode.value === 'rps'
+      ? enrichPercentilesWithTargetRps(assembled, snapshots, globalTargetRps, elapsed)
+      : assembled
+    liveErrors.value = errors
   }
 
   async function _pollLogs(executionId: string) {
@@ -215,25 +363,23 @@ export const useExecutionStore = defineStore('execution', () => {
 
   function startTimers(executionId: string) {
     stopTimers()
-    // 初始化 per-API 滑动窗口
     apiRpsWindows  = new Map()
     apiRtWindows   = new Map()
     apiErrWindows  = new Map()
-    _pollMetrics(executionId)
-    _pollApiMetrics(executionId)
+
+    const poll = () => _pollLiveData(executionId)
+    poll()
+    metricsTimer = setInterval(poll, LIVE_POLL_MS)
+
     _pollLogs(executionId)
-    metricsTimer = setInterval(() => {
-      _pollMetrics(executionId)
-      _pollApiMetrics(executionId)
-    }, 2000)
-    logTimer = setInterval(() => _pollLogs(executionId), 1500)
+    logTimer = setInterval(() => _pollLogs(executionId), 2000)
   }
 
   function stopTimers() {
     _stopInitPoller()
+    _stopPreparedPoller()
     if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null }
     if (logTimer) { clearInterval(logTimer); logTimer = null }
-    // 清理 per-API 滑动窗口
     apiRpsWindows.clear()
     apiRtWindows.clear()
     apiErrWindows.clear()
@@ -259,6 +405,13 @@ export const useExecutionStore = defineStore('execution', () => {
     summary.value = { rps: 0, avgResponseTime: 0, p99ResponseTime: 0, errorRate: 0, totalRequests: 0, successRequests: 0, failedRequests: 0, concurrent: 0 }
   }
 
+  /** 查询任务当前进行中的执行（部署中 / 待注入 / 注入中） */
+  async function findActiveExecution(taskId: string): Promise<ExecutionRecord | null> {
+    const res = await request.get(`/tasks/${taskId}/executions`, { params: { page: 1, pageSize: 10 } })
+    const list = res.data.data.list as ExecutionRecord[]
+    return list.find(r => isActiveExecution(r.status)) ?? null
+  }
+
   // 从执行 ID 恢复：刷新页面时重连到已有执行，不清空历史数据
   async function resumeExecution(executionId: string) {
     const s = await fetchState(executionId)
@@ -268,13 +421,16 @@ export const useExecutionStore = defineStore('execution', () => {
       startTimers(executionId)
     } else if (s.status === 'pending' || s.status === 'preparing') {
       _startInitPoller(executionId)
+    } else if (s.status === 'prepared') {
+      _startPreparedPoller(executionId)
+    } else if (s.status === 'success' || s.status === 'stopped' || s.status === 'circuit_broken' || s.status === 'failed') {
+      await loadHistoricalCharts(executionId)
     }
-    // prepared / success / failed / stopped：仅展示终态/待执行态，不启动轮询
   }
 
   return {
     state, summary, rpsData, responseTimeData, errorRateData, concurrentData, logs, loading,
     scenarioMode, targetRps, livePercentiles, liveErrors,
-    startExecution, startRun, stopExecution, fetchState, resumeExecution, startTimers, stopTimers, reset, clearCharts
+    startExecution, startRun, stopExecution, fetchState, findActiveExecution, resumeExecution, loadHistoricalCharts, startTimers, stopTimers, reset, clearCharts
   }
 })

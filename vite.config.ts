@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
+import type { IncomingMessage } from 'http'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
@@ -49,12 +50,34 @@ export default defineConfig({
     },
   },
   server: {
+    host: true,
     port: 5173,
     proxy: {
       '/api': {
         target: 'http://localhost:8090',
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            const clientIP = normalizeProxyClientIP(req as IncomingMessage)
+            if (!clientIP) return
+
+            const prior = req.headers['x-forwarded-for']
+            const xff = prior
+              ? `${Array.isArray(prior) ? prior[0] : prior}, ${clientIP}`
+              : clientIP
+            proxyReq.setHeader('X-Forwarded-For', xff)
+            proxyReq.setHeader('X-Real-IP', clientIP)
+          })
+        },
       },
     },
   },
 })
+
+function normalizeProxyClientIP(req: IncomingMessage): string {
+  const raw = req.socket?.remoteAddress || ''
+  if (!raw) return ''
+  if (raw.startsWith('::ffff:')) return raw.slice(7)
+  if (raw === '::1') return '127.0.0.1'
+  return raw
+}
