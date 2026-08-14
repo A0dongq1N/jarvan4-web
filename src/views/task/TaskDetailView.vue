@@ -41,240 +41,6 @@
         </div>
       </el-tab-pane>
 
-      <!-- 场景配置 -->
-      <el-tab-pane label="场景配置" name="scenario">
-        <div class="tab-panel">
-          <el-form :model="form.scenarioConfig" label-position="top" class="scenario-form">
-            <el-form-item label="场景模式">
-              <el-radio-group v-model="form.scenarioConfig.mode">
-                <el-radio-button value="step">VU 阶梯</el-radio-button>
-                <el-radio-button value="rps">RPS 模式</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-
-            <!-- VU 阶梯配置 -->
-            <template v-if="form.scenarioConfig.mode === 'step'">
-              <el-form-item label="阶梯配置">
-                <div class="step-config">
-                  <div
-                    v-for="(step, i) in form.scenarioConfig.steps"
-                    :key="i"
-                    class="step-item step-item--vu"
-                  >
-                    <span class="step-item__label">阶段 {{ i + 1 }}</span>
-                    <div class="step-item__group">
-                      <el-input-number v-model="step.concurrent" :min="1" placeholder="并发数" controls-position="right" class="step-input step-input--md" />
-                      <span class="step-item__unit">并发</span>
-                    </div>
-                    <div class="step-item__group">
-                      <span class="step-item__hint">{{ i === 0 ? '从 0 爬坡' : '爬坡' }}</span>
-                      <el-input-number v-model="step.rampTime" :min="0" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
-                      <span class="step-item__unit">秒</span>
-                    </div>
-                    <div class="step-item__group">
-                      <span class="step-item__hint">稳定</span>
-                      <el-input-number v-model="step.duration" :min="10" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
-                      <span class="step-item__unit">秒</span>
-                    </div>
-                    <el-button size="small" type="danger" plain :icon="Delete" class="step-item__delete" @click="removeStep(i)" />
-                  </div>
-                  <el-button size="small" :icon="Plus" @click="addStep">添加阶段</el-button>
-                </div>
-              </el-form-item>
-            </template>
-
-            <!-- RPS 模式：仅阶梯爬升 -->
-            <template v-if="form.scenarioConfig.mode === 'rps'">
-              <div class="rps-scene-hint">
-                <span>峰值 RPS</span>
-                <strong>{{ totalScriptTargetRps || '—' }}</strong>
-                <span class="rps-scene-hint__unit">req/s</span>
-                <span class="rps-scene-hint__desc">
-                  由各脚本目标 RPS 汇总；末阶段自动对齐峰值，前几阶段配置爬升曲线
-                </span>
-                <el-button v-if="!isCreate" size="small" text type="primary" @click="activeTab = 'scripts'">
-                  去配置脚本
-                </el-button>
-              </div>
-              <el-alert
-                v-if="form.scripts.length === 0"
-                type="warning"
-                :closable="false"
-                show-icon
-                title="请先在「脚本绑定」页添加脚本并配置各脚本目标 RPS"
-                style="margin-bottom: 16px"
-              />
-
-              <el-form-item label="RPS 阶梯配置">
-                <div class="step-config">
-                  <div
-                    v-for="(step, i) in form.scenarioConfig.rpsSteps"
-                    :key="i"
-                    class="step-item step-item--rps"
-                  >
-                    <span class="step-item__label">阶段 {{ i + 1 }}</span>
-                    <div class="step-item__group step-item__group--rps">
-                      <template v-if="i === (form.scenarioConfig.rpsSteps?.length ?? 0) - 1">
-                        <span class="rps-peak-readonly">{{ totalScriptTargetRps || '—' }}</span>
-                        <span class="step-item__unit">req/s</span>
-                        <el-tag size="small" type="info">峰值（脚本汇总）</el-tag>
-                      </template>
-                      <template v-else>
-                        <el-input-number
-                          v-model="step.rps"
-                          :min="1"
-                          :max="Math.max(1, totalScriptTargetRps - 1)"
-                          placeholder="目标 RPS"
-                          controls-position="right"
-                          class="step-input step-input--lg"
-                        />
-                        <span class="step-item__unit">req/s</span>
-                      </template>
-                    </div>
-                    <div class="step-item__group">
-                      <span class="step-item__hint">{{ i === 0 ? '从 0 爬坡' : '爬坡' }}</span>
-                      <el-input-number v-model="step.rampTime" :min="0" :max="step.duration" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
-                      <span class="step-item__unit">秒</span>
-                    </div>
-                    <div class="step-item__group">
-                      <span class="step-item__hint">稳定</span>
-                      <el-input-number v-model="step.duration" :min="10" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
-                      <span class="step-item__unit">秒</span>
-                    </div>
-                    <el-button size="small" type="danger" plain :icon="Delete" class="step-item__delete" @click="removeRpsStep(i)" />
-                  </div>
-                  <el-button size="small" :icon="Plus" @click="addRpsStep">添加阶段</el-button>
-                </div>
-              </el-form-item>
-
-              <!-- 并发 / RPS 曲线预览 -->
-              <div class="curve-preview">
-                <div class="curve-preview__title">{{ form.scenarioConfig.mode === 'rps' ? 'RPS 曲线预览' : '并发曲线预览' }}</div>
-                <BaseChart :option="curveOption" width="100%" height="180px" />
-              </div>
-            </template>
-
-            <el-form-item v-if="form.scenarioConfig.mode === 'step'" label=" ">
-              <div class="curve-preview curve-preview--inline">
-                <div class="curve-preview__title">并发曲线预览</div>
-                <BaseChart :option="curveOption" width="100%" height="180px" />
-              </div>
-            </el-form-item>
-          </el-form>
-
-          <!-- 熔断配置 -->
-          <div class="circuit-breaker">
-            <div class="circuit-breaker__header">
-              <span class="circuit-breaker__title">
-                <el-icon style="vertical-align: -2px; margin-right: 4px"><WarningFilled /></el-icon>
-                熔断保护
-              </span>
-              <el-switch v-model="form.scenarioConfig.circuitBreaker.enabled" />
-            </div>
-            <div v-if="form.scenarioConfig.circuitBreaker.enabled" class="circuit-breaker__body">
-
-              <!-- 接口级规则 -->
-              <div class="cb-section-label">
-                接口级规则
-                <span class="form-tip">命中任意规则即触发熔断，优先级高于全局兜底</span>
-              </div>
-              <div class="cb-rules">
-                <div class="cb-rule-header">
-                  <span style="flex:1">接口 Pattern</span>
-                  <span style="width:110px">错误率阈值</span>
-                  <span style="width:110px">统计窗口</span>
-                  <span style="width:110px">最少请求数</span>
-                  <span style="width:32px"></span>
-                </div>
-                <div
-                  v-for="(rule, i) in form.scenarioConfig.circuitBreaker.rules"
-                  :key="i"
-                  class="cb-rule-row"
-                >
-                  <el-input
-                    v-model="rule.urlPattern"
-                    placeholder="/api/pay 或 /api/order/*"
-                    style="flex: 1; min-width: 0"
-                  />
-                  <el-input-number
-                    v-model="rule.errorRateThreshold"
-                    :min="1" :max="100" :step="1"
-                    style="width: 110px"
-                  >
-                    <template #suffix>%</template>
-                  </el-input-number>
-                  <el-input-number
-                    v-model="rule.windowSeconds"
-                    :min="5" :max="300" :step="5"
-                    style="width: 110px"
-                  >
-                    <template #suffix>s</template>
-                  </el-input-number>
-                  <el-input-number
-                    v-model="rule.minRequests"
-                    :min="1" :max="10000" :step="10"
-                    style="width: 110px"
-                  />
-                  <el-button
-                    size="small" type="danger" plain :icon="Delete"
-                    style="width:32px;padding:0"
-                    @click="form.scenarioConfig.circuitBreaker.rules.splice(i, 1)"
-                  />
-                </div>
-                <el-button
-                  size="small" :icon="Plus" style="margin-top: 8px; align-self: flex-start"
-                  @click="form.scenarioConfig.circuitBreaker.rules.push({ urlPattern: '', errorRateThreshold: 10, windowSeconds: 30, minRequests: 50 })"
-                >添加接口规则</el-button>
-              </div>
-
-              <!-- 全局兜底 -->
-              <div class="cb-section-label" style="margin-top: 24px">
-                全局兜底
-                <span class="form-tip">所有请求整体错误率超过阈值时兜底触发</span>
-              </div>
-              <div class="cb-global-row">
-                <div class="cb-global-item">
-                  <div class="cb-global-item__label">错误率阈值</div>
-                  <el-input-number
-                    v-model="form.scenarioConfig.circuitBreaker.globalErrorRateThreshold"
-                    :min="1" :max="100" :step="1" style="width: 130px"
-                  />
-                  <span class="cb-unit">%</span>
-                </div>
-                <div class="cb-global-item">
-                  <div class="cb-global-item__label">统计窗口</div>
-                  <el-input-number
-                    v-model="form.scenarioConfig.circuitBreaker.globalWindowSeconds"
-                    :min="5" :max="300" :step="5" style="width: 130px"
-                  />
-                  <span class="cb-unit">秒</span>
-                </div>
-                <div class="cb-global-item">
-                  <div class="cb-global-item__label">最少请求数</div>
-                  <el-input-number
-                    v-model="form.scenarioConfig.circuitBreaker.globalMinRequests"
-                    :min="10" :max="10000" :step="10" style="width: 130px"
-                  />
-                </div>
-              </div>
-
-              <!-- 摘要预览 -->
-              <div class="circuit-breaker__preview">
-                <el-icon color="#ff9900"><WarningFilled /></el-icon>
-                <span>
-                  <template v-if="form.scenarioConfig.circuitBreaker.rules.length">
-                    接口规则 <strong>{{ form.scenarioConfig.circuitBreaker.rules.length }}</strong> 条（任意命中即停止）；
-                  </template>
-                  全局兜底：<strong>{{ form.scenarioConfig.circuitBreaker.globalWindowSeconds }}s</strong> 内 ≥
-                  <strong>{{ form.scenarioConfig.circuitBreaker.globalMinRequests }}</strong> 次请求且错误率超过
-                  <strong>{{ form.scenarioConfig.circuitBreaker.globalErrorRateThreshold }}%</strong> 时停止压测
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </el-tab-pane>
-
       <!-- 脚本绑定 -->
       <el-tab-pane label="脚本绑定" name="scripts" :disabled="isCreate">
         <div class="tab-panel">
@@ -423,6 +189,240 @@
         </div>
       </el-tab-pane>
 
+      <!-- 场景配置 -->
+      <el-tab-pane label="场景配置" name="scenario">
+        <div class="tab-panel">
+          <el-form :model="form.scenarioConfig" label-position="top" class="scenario-form">
+            <el-form-item label="场景模式">
+              <el-radio-group v-model="form.scenarioConfig.mode">
+                <el-radio-button value="vu">VU 阶梯</el-radio-button>
+                <el-radio-button value="rps">RPS 模式</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
+            <!-- VU 阶梯配置 -->
+            <template v-if="form.scenarioConfig.mode === 'vu'">
+              <el-form-item label="阶梯配置">
+                <div class="step-config">
+                  <div
+                    v-for="(step, i) in form.scenarioConfig.vuSteps"
+                    :key="i"
+                    class="step-item step-item--vu"
+                  >
+                    <span class="step-item__label">阶段 {{ i + 1 }}</span>
+                    <div class="step-item__group">
+                      <el-input-number v-model="step.concurrent" :min="1" placeholder="并发数" controls-position="right" class="step-input step-input--md" />
+                      <span class="step-item__unit">并发</span>
+                    </div>
+                    <div class="step-item__group">
+                      <span class="step-item__hint">{{ i === 0 ? '从 0 爬坡' : '爬坡' }}</span>
+                      <el-input-number v-model="step.rampTime" :min="0" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
+                      <span class="step-item__unit">秒</span>
+                    </div>
+                    <div class="step-item__group">
+                      <span class="step-item__hint">稳定</span>
+                      <el-input-number v-model="step.duration" :min="10" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
+                      <span class="step-item__unit">秒</span>
+                    </div>
+                    <el-button size="small" type="danger" plain :icon="Delete" class="step-item__delete" @click="removeStep(i)" />
+                  </div>
+                  <el-button size="small" :icon="Plus" @click="addStep">添加阶段</el-button>
+                </div>
+              </el-form-item>
+            </template>
+
+            <!-- RPS 模式：仅阶梯爬升 -->
+            <template v-if="form.scenarioConfig.mode === 'rps'">
+              <div class="rps-scene-hint">
+                <span>峰值 RPS</span>
+                <strong>{{ totalScriptTargetRps || '—' }}</strong>
+                <span class="rps-scene-hint__unit">req/s</span>
+                <span class="rps-scene-hint__desc">
+                  由各脚本目标 RPS 汇总；末阶段自动对齐峰值，前几阶段配置爬升曲线
+                </span>
+                <el-button v-if="!isCreate" size="small" text type="primary" @click="activeTab = 'scripts'">
+                  去配置脚本
+                </el-button>
+              </div>
+              <el-alert
+                v-if="form.scripts.length === 0"
+                type="warning"
+                :closable="false"
+                show-icon
+                title="请先在「脚本绑定」页添加脚本并配置各脚本目标 RPS"
+                style="margin-bottom: 16px"
+              />
+
+              <el-form-item label="RPS 阶梯配置">
+                <div class="step-config">
+                  <div
+                    v-for="(step, i) in form.scenarioConfig.rpsSteps"
+                    :key="i"
+                    class="step-item step-item--rps"
+                  >
+                    <span class="step-item__label">阶段 {{ i + 1 }}</span>
+                    <div class="step-item__group step-item__group--rps">
+                      <template v-if="i === (form.scenarioConfig.rpsSteps?.length ?? 0) - 1">
+                        <span class="rps-peak-readonly">{{ totalScriptTargetRps || '—' }}</span>
+                        <span class="step-item__unit">req/s</span>
+                        <el-tag size="small" type="info">峰值（脚本汇总）</el-tag>
+                      </template>
+                      <template v-else>
+                        <el-input-number
+                          v-model="step.rps"
+                          :min="1"
+                          :max="Math.max(1, totalScriptTargetRps - 1)"
+                          placeholder="目标 RPS"
+                          controls-position="right"
+                          class="step-input step-input--lg"
+                        />
+                        <span class="step-item__unit">req/s</span>
+                      </template>
+                    </div>
+                    <div class="step-item__group">
+                      <span class="step-item__hint">{{ i === 0 ? '从 0 爬坡' : '爬坡' }}</span>
+                      <el-input-number v-model="step.rampTime" :min="0" :max="step.duration" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
+                      <span class="step-item__unit">秒</span>
+                    </div>
+                    <div class="step-item__group">
+                      <span class="step-item__hint">稳定</span>
+                      <el-input-number v-model="step.duration" :min="10" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
+                      <span class="step-item__unit">秒</span>
+                    </div>
+                    <el-button size="small" type="danger" plain :icon="Delete" class="step-item__delete" @click="removeRpsStep(i)" />
+                  </div>
+                  <el-button size="small" :icon="Plus" @click="addRpsStep">添加阶段</el-button>
+                </div>
+              </el-form-item>
+
+              <!-- 并发 / RPS 曲线预览 -->
+              <div class="curve-preview">
+                <div class="curve-preview__title">{{ form.scenarioConfig.mode === 'rps' ? 'RPS 曲线预览' : '并发曲线预览' }}</div>
+                <BaseChart :option="curveOption" width="100%" height="180px" />
+              </div>
+            </template>
+
+            <el-form-item v-if="form.scenarioConfig.mode === 'vu'" label=" ">
+              <div class="curve-preview curve-preview--inline">
+                <div class="curve-preview__title">并发曲线预览</div>
+                <BaseChart :option="curveOption" width="100%" height="180px" />
+              </div>
+            </el-form-item>
+          </el-form>
+
+          <!-- 熔断配置 -->
+          <div class="circuit-breaker">
+            <div class="circuit-breaker__header">
+              <span class="circuit-breaker__title">
+                <el-icon style="vertical-align: -2px; margin-right: 4px"><WarningFilled /></el-icon>
+                熔断保护
+              </span>
+              <el-switch v-model="form.scenarioConfig.circuitBreaker.enabled" />
+            </div>
+            <div v-if="form.scenarioConfig.circuitBreaker.enabled" class="circuit-breaker__body">
+
+              <!-- 接口级规则 -->
+              <div class="cb-section-label">
+                接口级规则
+                <span class="form-tip">命中任意规则即触发熔断，优先级高于全局兜底</span>
+              </div>
+              <div class="cb-rules">
+                <div class="cb-rule-header">
+                  <span style="flex:1">接口 Pattern</span>
+                  <span style="width:110px">错误率阈值</span>
+                  <span style="width:110px">统计窗口</span>
+                  <span style="width:110px">最少请求数</span>
+                  <span style="width:32px"></span>
+                </div>
+                <div
+                  v-for="(rule, i) in form.scenarioConfig.circuitBreaker.rules"
+                  :key="i"
+                  class="cb-rule-row"
+                >
+                  <el-input
+                    v-model="rule.urlPattern"
+                    placeholder="/api/pay 或 /api/order/*"
+                    style="flex: 1; min-width: 0"
+                  />
+                  <el-input-number
+                    v-model="rule.errorRateThreshold"
+                    :min="1" :max="100" :step="1"
+                    style="width: 110px"
+                  >
+                    <template #suffix>%</template>
+                  </el-input-number>
+                  <el-input-number
+                    v-model="rule.windowSeconds"
+                    :min="5" :max="300" :step="5"
+                    style="width: 110px"
+                  >
+                    <template #suffix>s</template>
+                  </el-input-number>
+                  <el-input-number
+                    v-model="rule.minRequests"
+                    :min="1" :max="10000" :step="10"
+                    style="width: 110px"
+                  />
+                  <el-button
+                    size="small" type="danger" plain :icon="Delete"
+                    style="width:32px;padding:0"
+                    @click="form.scenarioConfig.circuitBreaker.rules.splice(i, 1)"
+                  />
+                </div>
+                <el-button
+                  size="small" :icon="Plus" style="margin-top: 8px; align-self: flex-start"
+                  @click="form.scenarioConfig.circuitBreaker.rules.push({ urlPattern: '', errorRateThreshold: 10, windowSeconds: 30, minRequests: 50 })"
+                >添加接口规则</el-button>
+              </div>
+
+              <!-- 全局兜底 -->
+              <div class="cb-section-label" style="margin-top: 24px">
+                全局兜底
+                <span class="form-tip">所有请求整体错误率超过阈值时兜底触发</span>
+              </div>
+              <div class="cb-global-row">
+                <div class="cb-global-item">
+                  <div class="cb-global-item__label">错误率阈值</div>
+                  <el-input-number
+                    v-model="form.scenarioConfig.circuitBreaker.globalErrorRateThreshold"
+                    :min="1" :max="100" :step="1" style="width: 130px"
+                  />
+                  <span class="cb-unit">%</span>
+                </div>
+                <div class="cb-global-item">
+                  <div class="cb-global-item__label">统计窗口</div>
+                  <el-input-number
+                    v-model="form.scenarioConfig.circuitBreaker.globalWindowSeconds"
+                    :min="5" :max="300" :step="5" style="width: 130px"
+                  />
+                  <span class="cb-unit">秒</span>
+                </div>
+                <div class="cb-global-item">
+                  <div class="cb-global-item__label">最少请求数</div>
+                  <el-input-number
+                    v-model="form.scenarioConfig.circuitBreaker.globalMinRequests"
+                    :min="10" :max="10000" :step="10" style="width: 130px"
+                  />
+                </div>
+              </div>
+
+              <!-- 摘要预览 -->
+              <div class="circuit-breaker__preview">
+                <el-icon color="#ff9900"><WarningFilled /></el-icon>
+                <span>
+                  <template v-if="form.scenarioConfig.circuitBreaker.rules.length">
+                    接口规则 <strong>{{ form.scenarioConfig.circuitBreaker.rules.length }}</strong> 条（任意命中即停止）；
+                  </template>
+                  全局兜底：<strong>{{ form.scenarioConfig.circuitBreaker.globalWindowSeconds }}s</strong> 内 ≥
+                  <strong>{{ form.scenarioConfig.circuitBreaker.globalMinRequests }}</strong> 次请求且错误率超过
+                  <strong>{{ form.scenarioConfig.circuitBreaker.globalErrorRateThreshold }}%</strong> 时停止压测
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <!-- 执行历史 -->
       <el-tab-pane label="执行历史" name="history" :disabled="isCreate">
         <div class="tab-panel">
@@ -546,7 +546,7 @@ const activeExecution = ref<ExecutionRecord | null>(null)
 const activeExecutionStatusLabel = computed(() => {
   if (!activeExecution.value) return ''
   const map: Record<string, string> = {
-    pending: '准备中',
+    pending: '待部署',
     preparing: '部署中',
     prepared: '待注入',
     running: '注入中',
@@ -601,12 +601,13 @@ const form = reactive({
   name: '',
   description: '',
   scenarioConfig: {
-    mode: 'step' as ScenarioConfig['mode'],
+    mode: 'vu' as ScenarioConfig['mode'],
     duration: 300,
     targetRps: 500,
     rpsRampTime: 0,
+    rpsRampDownTime: 3,
     rpsMode: 'step' as 'step',
-    steps: [
+    vuSteps: [
       { concurrent: 50,  duration: 100, rampTime: 20 },
       { concurrent: 100, duration: 100, rampTime: 20 },
       { concurrent: 200, duration: 100, rampTime: 30 },
@@ -657,10 +658,10 @@ watch(totalScriptTargetRps, () => syncScenePeakRps())
 const curveOption = computed(() => {
   const points: { x: number; y: number }[] = []
   const cfg = form.scenarioConfig
-  if (cfg.mode === 'step') {
+  if (cfg.mode === 'vu') {
     let t = 0
     let prevC = 0
-    ;(cfg.steps || []).forEach(step => {
+    ;(cfg.vuSteps || []).forEach(step => {
       const ramp = step.rampTime ?? 0
       if (ramp > 0) {
         // 爬坡段：斜线
@@ -692,6 +693,11 @@ const curveOption = computed(() => {
       points.push({ x: t, y: step.rps })
       prevR = step.rps
     })
+    const rampDown = cfg.rpsRampDownTime ?? 0
+    if (rampDown > 0 && prevR > 0) {
+      points.push({ x: t, y: prevR })
+      points.push({ x: t + rampDown, y: 0 })
+    }
   }
 
   return {
@@ -749,18 +755,27 @@ onMounted(async () => {
   await refreshActiveExecution()
 
   const tabFromQuery = route.query.tab as string | undefined
-  if (!isCreate.value && tabFromQuery === 'history') {
-    activeTab.value = 'history'
+  const guideFromQuery = route.query.guide as string | undefined
+  if (!isCreate.value) {
+    const validTabs = ['basic', 'scripts', 'scenario', 'history']
+    if (tabFromQuery && validTabs.includes(tabFromQuery)) {
+      activeTab.value = tabFromQuery
+    }
+    if (guideFromQuery === 'bind-scripts') {
+      activeTab.value = 'scripts'
+      notifyWarning('请先添加脚本，再配置 RPS 阶梯')
+      router.replace({ path: route.path, query: tabFromQuery === 'scripts' ? { tab: 'scripts' } : {} })
+    }
   }
 })
 
 function addStep() {
-  form.scenarioConfig.steps = form.scenarioConfig.steps || []
-  form.scenarioConfig.steps.push({ concurrent: 100, duration: 60, rampTime: 20 })
+  form.scenarioConfig.vuSteps = form.scenarioConfig.vuSteps || []
+  form.scenarioConfig.vuSteps.push({ concurrent: 100, duration: 60, rampTime: 20 })
 }
 
 function removeStep(i: number) {
-  form.scenarioConfig.steps?.splice(i, 1)
+  form.scenarioConfig.vuSteps?.splice(i, 1)
 }
 
 function addRpsStep() {
@@ -922,10 +937,10 @@ async function handleSave() {
         description: form.description,
         projectId: projectStore.currentProject.id,
       })
-      // 创建成功后再保存场景配置
+      // 创建成功后再保存场景配置，并引导用户先绑定脚本
       await taskStore.updateScene(newTask.id, form.scenarioConfig)
       notifySuccess('任务创建成功', '创建成功')
-      router.replace(`/task/${newTask.id}`)
+      router.replace({ path: `/task/${newTask.id}`, query: { tab: 'scripts', guide: 'bind-scripts' } })
     } else {
       // 串行执行：updateTask 内部会 upsert scene_config，必须先完成再覆盖 scene
       await taskStore.updateTask(taskId.value, { name: form.name, description: form.description })

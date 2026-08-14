@@ -57,15 +57,6 @@ const option = computed(() => {
     symbol: sym.symbol,
     symbolSize: sym.symbolSize,
     lineStyle: { color: LINE_COLOR, width: 2 },
-    areaStyle: {
-      color: {
-        type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-        colorStops: [
-          { offset: 0, color: 'rgba(224,34,110,0.15)' },
-          { offset: 1, color: 'rgba(224,34,110,0)' },
-        ],
-      },
-    },
   }],
   }
 })

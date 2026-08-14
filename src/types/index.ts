@@ -17,6 +17,7 @@ export interface PageResult<T> {
 }
 
 // 状态枚举
+// pending: 已创建执行，等待勾选脚本后部署
 // prepared: 脚本部署完成，等待用户手动触发开始压测
 export type TaskStatus = 'idle' | 'pending' | 'preparing' | 'prepared' | 'running' | 'success' | 'failed' | 'stopped' | 'circuit_broken'
 export type ScriptLanguage = 'go' | 'python' | 'javascript'
@@ -64,13 +65,13 @@ export interface StressTask {
   lastExecutionId?: string
 }
 
-export type ScenarioMode = 'step' | 'rps'
+export type ScenarioMode = 'vu' | 'rps'
 
 export interface ScenarioConfig {
   mode: ScenarioMode
   duration: number      // 秒
-  // 阶梯模式
-  steps?: StepConfig[]
+  // VU 阶梯模式
+  vuSteps?: VuStepConfig[]
   // RPS 阶梯模式（仅支持阶梯爬升）
   rpsMode?: 'step'
   rpsSteps?: RpsStepConfig[]
@@ -78,7 +79,8 @@ export interface ScenarioConfig {
   targetRps?: number
   /** @deprecated 旧固定速率字段 */
   rpsRampTime?: number
-  maxRpsPerWorker?: number // 单 Worker 最大 RPS（调度估算用，默认 2000）
+  /** RPS 稳态结束后的回落时长（秒）；0=到期即停 */
+  rpsRampDownTime?: number
   // 场景级环境变量，执行时下发给 Worker，脚本通过 ctx.Vars.Env(key) 读取
   envVars?: Record<string, string>
   // 熔断配置
@@ -103,7 +105,7 @@ export interface CircuitBreakerConfig {
   globalMinRequests: number
 }
 
-export interface StepConfig {
+export interface VuStepConfig {
   concurrent: number
   duration: number   // 稳定持续时长（秒）
   rampTime: number   // 从上一阶段线性爬升到本并发数所需时间（秒），0 = 瞬变，第一阶段从 0 起步
@@ -247,10 +249,16 @@ export interface MetricPoint {
   value: number
 }
 
+export interface RTHistogramBucket {
+  label: string
+  count: number
+}
+
 export interface MetricsSummary {
   rps: number
   avgResponseTime: number
   p99ResponseTime: number
+  maxResponseTime?: number
   errorRate: number
   totalRequests: number
   successRequests: number
@@ -266,6 +274,12 @@ export interface LogEntry {
   level: LogLevel
   message: string
   source?: string
+  workerId?: string
+}
+
+export interface ExecutionLogsResponse {
+  logs: LogEntry[]
+  droppedLogs: number
 }
 
 // 报告相关
@@ -283,6 +297,10 @@ export interface Report {
   responseTimeData: MetricPoint[]
   errorRateData: MetricPoint[]
   concurrentData: MetricPoint[]
+  p95Data?: MetricPoint[]
+  p99Data?: MetricPoint[]
+  maxData?: MetricPoint[]
+  rtHistogramData?: RTHistogramBucket[]
   percentiles: PercentileData[]
   errors: ErrorData[]
   createdAt: string
@@ -290,6 +308,7 @@ export interface Report {
   // 场景模式（RPS 模式报告差异化展示用）
   scenarioMode?: ScenarioMode
   targetRps?: number
+  circuitBreaker?: CircuitBreakerConfig
   scriptSnapshots?: ScriptSnapshot[]
   workerSnapshots?: WorkerSnapshot[]
   scriptStatuses?: ScriptStatusInfo[]
@@ -312,6 +331,10 @@ export interface PercentileData {
   rpsData?:          MetricPoint[]
   responseTimeData?: MetricPoint[]
   errorRateData?:    MetricPoint[]
+  p95Data?:          MetricPoint[]
+  p99Data?:          MetricPoint[]
+  maxData?:          MetricPoint[]
+  rtHistogramData?:  RTHistogramBucket[]
   // RPS 达成率（前端计算）
   peakRps?:        number  // 稳态 P95 峰值
   steadyAvgRps?:   number  // 稳态平均 RPS（达成率/相差对比用）

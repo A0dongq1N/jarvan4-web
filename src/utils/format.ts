@@ -15,6 +15,16 @@ export function formatTime(ts: number | string | Date, format = 'YYYY-MM-DD HH:m
 }
 
 /**
+ * 实时日志时间（本地时区，统一 HH:mm:ss.SSS，与页面其它时间展示一致）
+ */
+export function formatLogTime(timestamp: string): string {
+  const d = new Date(timestamp)
+  if (Number.isNaN(d.getTime())) return timestamp
+  const pad = (n: number, width = 2) => String(n).padStart(width, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
+}
+
+/**
  * 格式化数字（千分位）
  */
 export function formatNumber(n: number, decimals = 0): string {
@@ -63,6 +73,30 @@ export function formatMs(ms: number): string {
  */
 export function formatPercent(value: number, decimals = 2): string {
   return `${(value * 100).toFixed(decimals)}%`
+}
+
+/** 错误率展示：有失败时避免四舍五入成 0.00% */
+export function formatErrorRate(rate: number): string {
+  if (rate <= 0) return '0%'
+  const pct = rate * 100
+  if (pct >= 0.01) return `${pct.toFixed(2)}%`
+  if (pct >= 0.001) return `${pct.toFixed(3)}%`
+  if (pct >= 0.0001) return `${pct.toFixed(4)}%`
+  return '<0.0001%'
+}
+
+/**
+ * 直方图桶占比：count>0 时不应显示为 0%，按量级自动选择小数位
+ */
+export function formatHistogramShare(count: number, total: number): string {
+  if (total <= 0 || count <= 0) return '0%'
+  const pct = (count / total) * 100
+  if (pct >= 10) return `${pct.toFixed(1)}%`
+  if (pct >= 1) return `${pct.toFixed(2)}%`
+  if (pct >= 0.1) return `${pct.toFixed(2)}%`
+  if (pct >= 0.01) return `${pct.toFixed(3)}%`
+  if (pct >= 0.001) return `${pct.toFixed(4)}%`
+  return '<0.001%'
 }
 
 /**

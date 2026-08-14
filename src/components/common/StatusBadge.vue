@@ -13,7 +13,7 @@ const props = defineProps<{ status: TaskStatus }>()
 
 const labelMap: Record<TaskStatus, string> = {
   idle: '空闲',
-  pending: '环境准备中',
+  pending: '待部署',
   preparing: '脚本部署中',
   prepared: '部署完成',
   running: '流量注入中',

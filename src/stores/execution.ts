@@ -1,7 +1,8 @@
-import { defineStore } from 'pinia'
+import { defineStore, acceptHMRUpdate } from 'pinia'
 import { ref } from 'vue'
-import type { ExecutionState, ExecutionRecord, MetricPoint, MetricsSummary, LogEntry, ScenarioMode, PercentileData, ErrorData } from '@/types'
+import type { ExecutionState, ExecutionRecord, MetricPoint, MetricsSummary, LogEntry, ExecutionLogsResponse, ScenarioMode, PercentileData, ErrorData, Report } from '@/types'
 import request from '@/utils/request'
+import { fetchAllExecutionLogs } from '@/composables/useExecutionLogs'
 import { enrichPercentilesWithTargetRps } from '@/utils/apiTargetRps'
 import { isActiveExecution } from '@/utils/execution'
 
@@ -46,6 +47,9 @@ export const useExecutionStore = defineStore('execution', () => {
   const errorRateData = ref<MetricPoint[]>([])
   const concurrentData = ref<MetricPoint[]>([])
   const logs = ref<LogEntry[]>([])
+  const droppedLogs = ref(0)
+  const logLevelFilter = ref('')
+  const logWorkerFilter = ref('')
   const loading = ref(false)
   const lastLogId = ref<string | undefined>(undefined)
 
@@ -53,9 +57,10 @@ export const useExecutionStore = defineStore('execution', () => {
   const scenarioMode = ref<ScenarioMode | undefined>(undefined)
   const targetRps = ref<number | undefined>(undefined)
 
-  // 接口维度实时指标
+  // 接口维度实时指标（兼容旧逻辑，主展示走 liveReport）
   const livePercentiles = ref<PercentileData[]>([])
   const liveErrors = ref<ErrorData[]>([])
+  const liveReport = ref<Report | null>(null)
 
   let metricsTimer: ReturnType<typeof setInterval> | null = null
   let logTimer: ReturnType<typeof setInterval> | null = null
@@ -78,9 +83,10 @@ export const useExecutionStore = defineStore('execution', () => {
       targetRps.value = executionState.targetRps
       clearCharts()
 
-      if (executionState.status === 'pending' || executionState.status === 'preparing') {
-        // pending/preparing 阶段：轮询初始化与脚本部署进度，等待转 prepared
+      if (executionState.status === 'preparing') {
         _startInitPoller(executionState.id)
+      } else if (executionState.status === 'pending') {
+        _stopInitPoller()
       } else if (executionState.status === 'prepared') {
         // prepared：等待用户 startRun，轮询以感知后端超时自动取消
         _stopInitPoller()
@@ -88,6 +94,25 @@ export const useExecutionStore = defineStore('execution', () => {
       } else if (executionState.status === 'running') {
         startTimers(executionState.id)
       } else {
+        _stopInitPoller()
+      }
+      return executionState
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function deployScripts(executionId: string, scriptIds: string[]) {
+    loading.value = true
+    try {
+      const res = await request.post(`/executions/${executionId}/deploy`, { scriptIds })
+      const executionState: ExecutionState = res.data.data
+      state.value = executionState
+      scenarioMode.value = executionState.scenarioMode
+      targetRps.value = executionState.targetRps
+      if (executionState.status === 'preparing') {
+        _startInitPoller(executionState.id)
+      } else if (executionState.status === 'failed') {
         _stopInitPoller()
       }
       return executionState
@@ -127,6 +152,7 @@ export const useExecutionStore = defineStore('execution', () => {
       const res = await request.get(`/executions/${executionId}`)
       state.value = res.data.data
       await loadHistoricalCharts(executionId)
+      await _pollLogs(executionId)
     } catch (e) {
       console.error('[execution] refresh after stop error', e)
     }
@@ -263,26 +289,26 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   }
 
+  async function fetchReportPreview(executionId: string) {
+    try {
+      const res = await request.get(`/executions/${executionId}/report-preview`)
+      liveReport.value = res.data.data as Report
+    } catch (e) {
+      console.error('[execution] fetch report preview error', e)
+    }
+  }
+
   async function _pollLiveData(executionId: string) {
     try {
-      const [metricsRes, chartRes, stateRes, apiRes] = await Promise.all([
-        request.get(`/executions/${executionId}/metrics`),
-        request.get(`/executions/${executionId}/chart-data`),
+      const [stateRes] = await Promise.all([
         request.get(`/executions/${executionId}`),
-        request.get(`/executions/${executionId}/api-metrics`),
+        fetchReportPreview(executionId),
       ])
 
-      const data = metricsRes.data.data
-      summary.value = data
       state.value = stateRes.data.data
 
-      const chart = chartRes.data.data
-      applyLiveMetricsToCharts(chart, data)
-
-      const { percentiles, errors } = apiRes.data.data as { percentiles: PercentileData[]; errors: ErrorData[] }
-      _applyApiMetrics(percentiles, errors, percentiles.some(p => (p.rpsData?.length ?? 0) > 1))
-
       if (state.value!.status !== 'running') {
+        await loadHistoricalLogs(executionId)
         stopTimers()
       }
     } catch (e) {
@@ -291,20 +317,7 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   async function loadHistoricalCharts(executionId: string) {
-    try {
-      const [metricsRes, chartRes, apiRes] = await Promise.all([
-        request.get(`/executions/${executionId}/metrics`),
-        request.get(`/executions/${executionId}/chart-data`),
-        request.get(`/executions/${executionId}/api-metrics`),
-      ])
-      summary.value = metricsRes.data.data
-      const chart = chartRes.data.data
-      applyChartData(chart)
-      const { percentiles, errors } = apiRes.data.data as { percentiles: PercentileData[]; errors: ErrorData[] }
-      _applyApiMetrics(percentiles, errors, true)
-    } catch (e) {
-      console.error('[execution] load historical charts error', e)
-    }
+    await fetchReportPreview(executionId)
   }
 
   function _applyApiMetrics(percentiles: PercentileData[], errors: ErrorData[], fromHistory = false) {
@@ -348,16 +361,60 @@ export const useExecutionStore = defineStore('execution', () => {
 
   async function _pollLogs(executionId: string) {
     try {
-      const res = await request.get(`/executions/${executionId}/logs`, {
-        params: { last_id: lastLogId.value }
-      })
-      const newLogs: LogEntry[] = res.data.data
-      if (newLogs.length) {
+      const params: Record<string, string> = {}
+      if (lastLogId.value) params.last_id = lastLogId.value
+      if (logLevelFilter.value) params.level = logLevelFilter.value
+      if (logWorkerFilter.value) params.worker_id = logWorkerFilter.value
+      const res = await request.get(`/executions/${executionId}/logs`, { params })
+      const payload = res.data.data as ExecutionLogsResponse
+      droppedLogs.value = payload.droppedLogs ?? 0
+      const newLogs = payload.logs ?? []
+      if (!newLogs.length) return
+
+      const seen = new Set(logs.value.map(l => l.id))
+      const unique = newLogs.filter(l => !seen.has(l.id))
+      if (!unique.length) {
         lastLogId.value = newLogs[newLogs.length - 1].id
-        logs.value = [...logs.value, ...newLogs].slice(-500)
+        return
       }
+
+      lastLogId.value = unique[unique.length - 1].id
+      logs.value = [...logs.value, ...unique].slice(-500)
     } catch (e) {
       console.error('[execution] poll logs error', e)
+    }
+  }
+
+  function clearLogs() {
+    logs.value = []
+    lastLogId.value = undefined
+    droppedLogs.value = 0
+  }
+
+  async function loadHistoricalLogs(executionId: string) {
+    try {
+      const result = await fetchAllExecutionLogs(executionId, logLevelFilter.value, logWorkerFilter.value)
+      logs.value = result.logs
+      droppedLogs.value = result.droppedLogs
+      lastLogId.value = result.lastId
+    } catch (e) {
+      console.error('[execution] load historical logs error', e)
+    }
+  }
+
+  function setLogLevelFilter(level: string) {
+    if (logLevelFilter.value === level) return
+    logLevelFilter.value = level
+    if (state.value?.id) {
+      void loadHistoricalLogs(state.value.id)
+    }
+  }
+
+  function setLogWorkerFilter(workerId: string) {
+    if (logWorkerFilter.value === workerId) return
+    logWorkerFilter.value = workerId
+    if (state.value?.id) {
+      void loadHistoricalLogs(state.value.id)
     }
   }
 
@@ -371,7 +428,8 @@ export const useExecutionStore = defineStore('execution', () => {
     poll()
     metricsTimer = setInterval(poll, LIVE_POLL_MS)
 
-    _pollLogs(executionId)
+    // 全量拉取一次，避免首包早于 Worker 上报导致一直空白；之后走增量轮询
+    void loadHistoricalLogs(executionId)
     logTimer = setInterval(() => _pollLogs(executionId), 2000)
   }
 
@@ -390,10 +448,10 @@ export const useExecutionStore = defineStore('execution', () => {
     responseTimeData.value = []
     errorRateData.value = []
     concurrentData.value = []
-    logs.value = []
-    lastLogId.value = undefined
+    clearLogs()
     livePercentiles.value = []
     liveErrors.value = []
+    liveReport.value = null
   }
 
   function reset() {
@@ -419,18 +477,23 @@ export const useExecutionStore = defineStore('execution', () => {
     targetRps.value = s.targetRps
     if (s.status === 'running') {
       startTimers(executionId)
-    } else if (s.status === 'pending' || s.status === 'preparing') {
+    } else if (s.status === 'preparing') {
       _startInitPoller(executionId)
     } else if (s.status === 'prepared') {
       _startPreparedPoller(executionId)
     } else if (s.status === 'success' || s.status === 'stopped' || s.status === 'circuit_broken' || s.status === 'failed') {
       await loadHistoricalCharts(executionId)
+      await loadHistoricalLogs(executionId)
     }
   }
 
   return {
-    state, summary, rpsData, responseTimeData, errorRateData, concurrentData, logs, loading,
-    scenarioMode, targetRps, livePercentiles, liveErrors,
-    startExecution, startRun, stopExecution, fetchState, findActiveExecution, resumeExecution, loadHistoricalCharts, startTimers, stopTimers, reset, clearCharts
+    state, summary, rpsData, responseTimeData, errorRateData, concurrentData, logs, droppedLogs, logLevelFilter, logWorkerFilter, loading,
+    scenarioMode, targetRps, livePercentiles, liveErrors, liveReport,
+    startExecution, deployScripts, startRun, stopExecution, fetchState, findActiveExecution, resumeExecution, loadHistoricalCharts, loadHistoricalLogs, startTimers, stopTimers, reset, clearCharts, clearLogs, setLogLevelFilter, setLogWorkerFilter
   }
 })
+
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useExecutionStore, import.meta.hot))
+}

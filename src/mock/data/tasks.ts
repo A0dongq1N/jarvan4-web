@@ -7,9 +7,9 @@ export const mockTasks: StressTask[] = [
     description: '测试用户登录接口在高并发下的性能表现',
     status: 'idle',
     scenarioConfig: {
-      mode: 'step',
+      mode: 'vu',
       duration: 300,
-      steps: [
+      vuSteps: [
         { concurrent: 200, duration: 240, rampTime: 60 },
       ],
     },
@@ -23,9 +23,9 @@ export const mockTasks: StressTask[] = [
     description: '阶梯式增加并发数，测试搜索接口性能极限',
     status: 'success',
     scenarioConfig: {
-      mode: 'step',
+      mode: 'vu',
       duration: 600,
-      steps: [
+      vuSteps: [
         { concurrent: 50,  duration: 120, rampTime: 0  },
         { concurrent: 100, duration: 120, rampTime: 20 },
         { concurrent: 200, duration: 120, rampTime: 30 },
@@ -63,9 +63,9 @@ export const mockTasks: StressTask[] = [
     description: '长时间运行测试支付接口的稳定性',
     status: 'idle',
     scenarioConfig: {
-      mode: 'step',
+      mode: 'vu',
       duration: 3600,
-      steps: [
+      vuSteps: [
         { concurrent: 50, duration: 3480, rampTime: 120 },
       ],
     },
@@ -79,9 +79,9 @@ export const mockTasks: StressTask[] = [
     description: '商品详情 gRPC 接口并发压测，P99 目标 < 50ms',
     status: 'idle',
     scenarioConfig: {
-      mode: 'step',
+      mode: 'vu',
       duration: 300,
-      steps: [
+      vuSteps: [
         { concurrent: 500, duration: 270, rampTime: 30 },
       ],
     },

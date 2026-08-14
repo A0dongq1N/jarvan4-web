@@ -22,6 +22,7 @@ declare module 'vue' {
     ElBreadcrumbItem: typeof import('element-plus/es')['ElBreadcrumbItem']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
+    ElCheckboxGroup: typeof import('element-plus/es')['ElCheckboxGroup']
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDrawer: typeof import('element-plus/es')['ElDrawer']
@@ -53,6 +54,7 @@ declare module 'vue' {
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     EmptyState: typeof import('./components/common/EmptyState.vue')['default']
     ErrorRateChart: typeof import('./components/charts/ErrorRateChart.vue')['default']
+    ExecutionLogPanel: typeof import('./components/execution/ExecutionLogPanel.vue')['default']
     ExecutionStepper: typeof import('./components/execution/ExecutionStepper.vue')['default']
     HelloWorld: typeof import('./components/HelloWorld.vue')['default']
     MetricCard: typeof import('./components/common/MetricCard.vue')['default']
@@ -64,6 +66,7 @@ declare module 'vue' {
     RpsChart: typeof import('./components/charts/RpsChart.vue')['default']
     SideBar: typeof import('./components/layout/SideBar.vue')['default']
     StatusBadge: typeof import('./components/common/StatusBadge.vue')['default']
+    StressReportResults: typeof import('./components/report/StressReportResults.vue')['default']
     TopBar: typeof import('./components/layout/TopBar.vue')['default']
   }
   export interface GlobalDirectives {

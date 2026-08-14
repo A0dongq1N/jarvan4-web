@@ -24,8 +24,6 @@ const AXIS_COLOR   = '#babcbe'  // gray-70
 const SPLIT_COLOR  = '#ececed'  // gray-90
 const LABEL_COLOR  = '#9c9fa3'  // gray-60
 const LINE_COLOR   = '#3871dc'  // primary
-const AREA_START   = 'rgba(56,113,220,0.18)'
-const AREA_END     = 'rgba(56,113,220,0)'
 
 const option = computed(() => {
   const sym = sparseLineSymbol(props.data.length)
@@ -59,15 +57,6 @@ const option = computed(() => {
     symbol: sym.symbol,
     symbolSize: sym.symbolSize,
     lineStyle: { color: LINE_COLOR, width: 2 },
-    areaStyle: {
-      color: {
-        type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-        colorStops: [
-          { offset: 0, color: AREA_START },
-          { offset: 1, color: AREA_END },
-        ],
-      },
-    },
     markLine: props.targetValue != null ? {
       silent: true,
       symbol: 'none',

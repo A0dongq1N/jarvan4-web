@@ -60,15 +60,10 @@
             {{ formatTime(row.startTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <div class="row-actions">
               <el-button size="small" type="primary" @click="$router.push(`/report/${row.id}`)">详情</el-button>
-              <el-button
-                v-if="row.taskId"
-                size="small"
-                @click="$router.push({ path: `/task/${row.taskId}`, query: { tab: 'history' } })"
-              >任务</el-button>
               <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
             </div>
           </template>

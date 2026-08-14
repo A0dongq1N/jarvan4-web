@@ -188,7 +188,7 @@ function handleSearch() {
 }
 
 function modeLabel(mode: string) {
-  const map: Record<string, string> = { step: 'VU 阶梯', rps: 'RPS' }
+  const map: Record<string, string> = { vu: 'VU 阶梯', rps: 'RPS' }
   return map[mode] || mode
 }
 
@@ -318,15 +318,11 @@ async function doDelete() {
   font-size: 12px;
   font-weight: 500;
 
-  &--concurrent {
+  &--vu,
+  &--step {
     background: rgba($color-primary, 0.08);
     color: $color-primary;
     border: 1px solid rgba($color-primary, 0.2);
-  }
-  &--step {
-    background: rgba($color-warning, 0.08);
-    color: darken(#ff9900, 10%);
-    border: 1px solid rgba($color-warning, 0.25);
   }
   &--rps {
     background: rgba(#722ed1, 0.08);

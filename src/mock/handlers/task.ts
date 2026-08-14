@@ -46,7 +46,7 @@ export const taskHandlers: MockHandler[] = [
         name: data.name || '未命名任务',
         description: data.description,
         status: 'idle',
-        scenarioConfig: data.scenarioConfig || { mode: 'step', duration: 300, steps: [{ concurrent: 100, rampTime: 20, duration: 280 }] },
+        scenarioConfig: data.scenarioConfig || { mode: 'vu', duration: 300, vuSteps: [{ concurrent: 100, rampTime: 20, duration: 280 }] },
         scripts: data.scripts || [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

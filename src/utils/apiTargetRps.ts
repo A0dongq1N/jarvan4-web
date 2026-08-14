@@ -5,18 +5,29 @@ export interface ScriptWeightSnapshot {
   weight: number
 }
 
-/** 稳态区间：达到目标 90% 起至倒数第 2 个点（排除末尾 flush） */
+/** 稳态区间：达到目标 90% 起，至回落开始前（排除末尾 flush） */
 function steadyStateSlice(values: number[], targetRps: number): number[] {
   if (!values.length) return []
-  const end = values.length >= 2 ? values.length - 1 : values.length
+  const endExclusive = values.length >= 2 ? values.length - 1 : values.length
   let start = 0
+  let end = endExclusive
   if (targetRps > 0) {
     const threshold = targetRps * 0.9
-    for (let i = 0; i < end; i++) {
+    for (let i = 0; i < endExclusive; i++) {
       if (values[i] >= threshold) {
         start = i
         break
       }
+    }
+    // 排除回落段：稳态结束后 RPS 线性降至 0，不应计入达成率
+    let lastSteady = -1
+    for (let i = start; i < endExclusive; i++) {
+      if (values[i] >= threshold) {
+        lastSteady = i
+      }
+    }
+    if (lastSteady >= start) {
+      end = lastSteady + 1
     }
   }
   if (start >= end) {
@@ -51,7 +62,7 @@ export function computeSteadyPeakRps(rpsData: MetricPoint[] | undefined, targetR
   return percentile(steady, 0.95)
 }
 
-/** 稳态平均 RPS（与目标对比更公允，排除爬坡） */
+/** 稳态平均 RPS（与目标对比更公允，排除爬坡与回落） */
 export function computeSteadyAvgRps(rpsData: MetricPoint[] | undefined, targetRps: number): number | undefined {
   if (!rpsData?.length) return undefined
   const steady = steadyStateSlice(rpsData.map(p => p.value), targetRps)

@@ -21,7 +21,10 @@
           </span>
         </div>
         <p v-if="showStartHint" class="execution-control__hint">
-          将先部署脚本到 Worker，部署完成后开始注入流量
+          先创建执行并勾选脚本，部署完成后再注入流量
+        </p>
+        <p v-else-if="executionStatus === 'pending'" class="execution-control__hint">
+          勾选本次要部署的脚本，确认后点击「开始部署」
         </p>
       </div>
 
@@ -37,6 +40,17 @@
           {{ startStressLabel }}
         </el-button>
         <el-button
+          v-if="executionStatus === 'pending'"
+          type="primary"
+          :icon="VideoPlay"
+          size="large"
+          :loading="executionStore.loading"
+          :disabled="selectedScriptIds.length === 0"
+          @click="handleDeploy"
+        >
+          开始部署
+        </el-button>
+        <el-button
           v-if="isDeploying"
           type="primary"
           :icon="VideoPlay"
@@ -44,7 +58,7 @@
           loading
           disabled
         >
-          压测准备中...
+          正在部署脚本...
         </el-button>
         <el-button
           v-if="executionStatus === 'prepared' && hasDeployedScripts"
@@ -82,7 +96,8 @@
     <el-alert
       v-if="executionStatus === 'failed' && executionStore.state?.errorMsg && !isDeployFailure"
       type="error"
-      :title="executionStore.state.errorMsg"
+      title="压测失败"
+      :description="executionStore.state.errorMsg"
       show-icon
       :closable="false"
       class="execution-error-alert"
@@ -131,16 +146,42 @@
         show-icon
         :closable="false"
         class="deploy-block-alert"
-        :title="deployBlockError"
+        :title="formatDeployError(deployBlockError).title"
+        :description="formatDeployError(deployBlockError).description"
       />
 
-    <!-- Pending/Preparing/DeployFailed: 初始化面板 -->
-    <div v-if="executionStatus === 'pending' || executionStatus === 'preparing' || isDeployFailure" class="init-panel">
+    <div v-if="executionStatus === 'pending'" class="script-select-panel">
+      <div class="script-select-panel__header">
+        <span class="script-select-panel__title">选择要部署的脚本</span>
+        <span class="script-select-panel__hint">未勾选的脚本不会下发到 Worker，也不参与本次注入</span>
+      </div>
+      <el-checkbox
+        :model-value="allScriptsSelected"
+        :indeterminate="scriptsIndeterminate"
+        @change="toggleSelectAll"
+      >
+        全选
+      </el-checkbox>
+      <el-checkbox-group v-model="selectedScriptIds" class="script-select-panel__list">
+        <label
+          v-for="s in candidateScripts"
+          :key="s.scriptId"
+          class="script-select-item"
+        >
+          <el-checkbox :value="s.scriptId">
+            <span class="script-select-item__name">{{ s.scriptName }}</span>
+            <code v-if="s.commitHash" class="script-select-item__hash">{{ s.commitHash.slice(0, 8) }}</code>
+          </el-checkbox>
+        </label>
+      </el-checkbox-group>
+    </div>
+
+    <!-- Preparing/DeployFailed: 初始化面板 -->
+    <div v-if="executionStatus === 'preparing' || isDeployFailure" class="init-panel">
       <div class="init-panel__header">
         <span class="init-panel__title">
           <template v-if="isDeployFailure">{{ deployFailureTitle }}</template>
-          <template v-else-if="executionStatus === 'preparing'">正在部署脚本到 Worker...</template>
-          <template v-else>正在准备执行环境...</template>
+          <template v-else>正在部署脚本到 Worker...</template>
         </span>
         <span class="init-panel__hint">
           <template v-if="isDeployFailure">请根据失败原因调整任务配置或扩容节点后，点击「再次压测」重试</template>
@@ -301,16 +342,30 @@
             >
               <span class="script-deploy-worker__addr">{{ w.addr }}</span>
               <span class="script-deploy-worker__status">{{ scriptStatusLabel(w.status) }}</span>
-              <span v-if="w.status === 'failed' && w.error" class="script-deploy-worker__error">{{ w.error }}</span>
+              <el-alert
+                v-if="w.status === 'failed' && w.error"
+                type="error"
+                show-icon
+                :closable="false"
+                class="script-deploy-worker__alert"
+                :title="formatDeployError(w.error).title"
+                :description="formatDeployError(w.error).description"
+              />
             </div>
           </div>
           <div v-else class="script-deploy-item__row script-deploy-item__row--fallback">
             <span class="script-deploy-item__label">状态:</span>
             <span class="script-deploy-item__status">{{ scriptStatusLabel(s.status) }}</span>
           </div>
-          <div v-if="s.status === 'failed' && s.error" class="script-deploy-item__error">
-            错误: {{ s.error }}
-          </div>
+          <el-alert
+            v-if="s.status === 'failed' && s.error"
+            type="error"
+            show-icon
+            :closable="false"
+            class="script-deploy-item__alert"
+            :title="formatDeployError(s.error).title"
+            :description="formatDeployError(s.error).description"
+          />
         </div>
       </div>
     </div>
@@ -323,210 +378,27 @@
         <span class="phase-panel__subtitle">实时观测压测指标、接口表现与错误分析</span>
       </div>
 
-    <!-- Summary Metrics（running 及之后才显示） -->
+    <!-- Summary Metrics + Charts（与报告页同一套展示） -->
     <template v-if="executionStatus !== 'pending' && executionStatus !== 'preparing' && executionStatus !== 'prepared' && executionStatus !== 'idle'">
-      <div class="metrics-summary">
-        <MetricCard
-          label="当前 RPS"
-          :value="formatNumber(executionStore.summary.rps, 1)"
-          unit="req/s"
-          accent="#3871dc"
-        />
-        <MetricCard
-          label="平均响应时间"
-          :value="formatMs(executionStore.summary.avgResponseTime)"
-          unit="ms"
-          accent="#ff7f40"
-        />
-        <MetricCard
-          label="错误率"
-          :value="formatPercent(executionStore.summary.errorRate)"
-          :trend-reverse="true"
-          accent="#e0226e"
-        />
-        <!-- 第4张指标卡：仅 VU 模式展示并发用户 -->
-        <MetricCard
-          v-if="executionStore.scenarioMode === 'step'"
-          label="并发用户"
-          :value="formatNumber(executionStore.summary.concurrent, 0)"
-          unit="个"
-          accent="#1b855e"
-        />
-      </div>
+      <StressReportResults
+        v-if="executionStore.liveReport"
+        :report="executionStore.liveReport"
+        :show-verdict="isTerminalExecution"
+      />
 
-      <!-- Charts Dashboard -->
-      <div class="charts-dashboard">
-        <!-- RPS 图：RPS 模式传入目标参考线 -->
-        <RpsChart
-          :data="executionStore.rpsData"
-          :target-value="executionStore.scenarioMode === 'rps' ? executionStore.targetRps : undefined"
-        />
-        <ResponseTimeChart :data="executionStore.responseTimeData" />
-        <ErrorRateChart :data="executionStore.errorRateData" />
-        <!-- 仅 VU 模式展示并发图 -->
-        <ConcurrentChart
-          v-if="executionStore.scenarioMode === 'step'"
-          :data="executionStore.concurrentData"
-        />
-      </div>
-
-      <!-- [新增] 接口维度指标（running 时实时展示） -->
-      <section v-if="executionStatus === 'running' && executionStore.livePercentiles.length > 0" class="section">
-        <h3 class="section__title">接口维度指标</h3>
-        <el-table
-          :data="executionStore.livePercentiles"
-          highlight-current-row
-          style="cursor: pointer"
-          @current-change="handleApiChange"
-        >
-          <el-table-column label="接口" prop="api" min-width="200" />
-          <el-table-column label="脚本" prop="scriptName" width="120" />
-          <el-table-column label="请求数" prop="requests" width="100">
-            <template #default="{ row }">{{ formatNumber(row.requests, 0) }}</template>
-          </el-table-column>
-          <el-table-column label="实际 RPS" width="100">
-            <template #default="{ row }">{{ row.actualRps ? row.actualRps.toFixed(1) : '-' }}</template>
-          </el-table-column>
-          <el-table-column v-if="executionStore.scenarioMode === 'rps'" label="目标 RPS" width="100">
-            <template #default="{ row }">{{ row.targetRps ? row.targetRps.toFixed(1) : '-' }}</template>
-          </el-table-column>
-          <el-table-column v-if="executionStore.scenarioMode === 'rps'" label="相差" width="100">
-            <template #default="{ row }">
-              <span v-if="row.rpsGap !== undefined" :style="{ color: row.rpsGap > 0 ? '#e54545' : row.rpsGap < 0 ? '#00a870' : '#869archc' }">
-                {{ row.rpsGap > 0 ? '-' : '+' }}{{ Math.abs(row.rpsGap).toFixed(1) }}
-                ({{ Math.abs(row.rpsGapPercent).toFixed(1) }}%)
-              </span>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="错误数" prop="errors" width="90">
-            <template #default="{ row }">
-              <span :style="{ color: row.errors > 0 ? '#e54545' : '#86909c' }">
-                {{ formatNumber(row.errors, 0) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="错误率" prop="errorRate" width="90">
-            <template #default="{ row }">
-              <span :class="errorRateClass(row.errorRate)">{{ formatPercent(row.errorRate) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="P50" prop="p50" width="75">
-            <template #default="{ row }">{{ formatMs(row.p50) }}</template>
-          </el-table-column>
-          <el-table-column label="P75" prop="p75" width="75">
-            <template #default="{ row }">{{ formatMs(row.p75) }}</template>
-          </el-table-column>
-          <el-table-column label="P90" prop="p90" width="75">
-            <template #default="{ row }">{{ formatMs(row.p90) }}</template>
-          </el-table-column>
-          <el-table-column label="P95" prop="p95" width="75">
-            <template #default="{ row }">{{ formatMs(row.p95) }}</template>
-          </el-table-column>
-          <el-table-column label="P99" prop="p99" width="80">
-            <template #default="{ row }">
-              <span :style="{ color: row.p99 > 1000 ? '#e54545' : row.p99 > 500 ? '#ff9c19' : '#00a870' }">
-                {{ formatMs(row.p99) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="最大" prop="max" width="80">
-            <template #default="{ row }">{{ formatMs(row.max) }}</template>
-          </el-table-column>
-          <el-table-column label="最小" prop="min" width="75">
-            <template #default="{ row }">{{ formatMs(row.min) }}</template>
-          </el-table-column>
-        </el-table>
-
-        <transition name="fade">
-          <div v-if="selectedApi?.rpsData?.length" class="api-charts">
-            <div class="api-charts__header">
-              <code class="api-charts__name">{{ selectedApi.api }}</code>
-              <span class="api-charts__hint">接口维度实时趋势</span>
-            </div>
-            <div class="api-charts__row">
-              <div class="chart-card">
-                <div class="chart-card__title">RPS 趋势</div>
-                <BaseChart :option="apiRpsChartOption" width="100%" height="180px" />
-              </div>
-              <div class="chart-card">
-                <div class="chart-card__title">响应时间趋势</div>
-                <BaseChart :option="apiRtChartOption" width="100%" height="180px" />
-              </div>
-              <div class="chart-card">
-                <div class="chart-card__title">错误率趋势</div>
-                <BaseChart :option="apiErrChartOption" width="100%" height="180px" />
-              </div>
-            </div>
-          </div>
-        </transition>
-      </section>
-
-      <!-- [新增] 错误分析（running 时实时展示） -->
-      <section v-if="executionStatus === 'running' && executionStore.liveErrors.length > 0" class="section">
-        <h3 class="section__title">错误分析</h3>
-        <div class="error-analysis">
-          <div class="error-chart">
-            <BaseChart :option="errorPieOption" width="100%" height="260px" />
-          </div>
-          <div class="error-table">
-            <el-table :data="executionStore.liveErrors" stripe>
-              <el-table-column label="类型" width="90">
-                <template #default="{ row }">
-                  <el-tag
-                    :type="row.errorType === 'business' ? 'warning' : 'danger'"
-                    size="small"
-                  >{{ row.errorType === 'business' ? '业务' : '系统' }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="错误码" prop="code" width="130">
-                <template #default="{ row }">
-                  <code style="font-size: 12px; background: #f4f5f5; padding: 1px 6px; border-radius: 3px">{{ row.code }}</code>
-                </template>
-              </el-table-column>
-              <el-table-column label="描述" prop="message" min-width="200" show-overflow-tooltip />
-              <el-table-column label="次数" prop="count" width="90">
-                <template #default="{ row }">{{ formatNumber(row.count, 0) }}</template>
-              </el-table-column>
-              <el-table-column label="占比" prop="percentage" width="80">
-                <template #default="{ row }">{{ row.percentage.toFixed(1) }}%</template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </div>
-      </section>
-
-      <!-- Real-time Logs -->
-      <div class="log-panel">
-        <div class="log-panel__header">
-          <span class="log-panel__title">实时日志</span>
-          <div class="log-panel__controls">
-            <el-select v-model="logLevelFilter" size="small" placeholder="日志级别" clearable style="width: 120px">
-              <el-option label="全部" value="" />
-              <el-option label="INFO" value="info" />
-              <el-option label="WARN" value="warn" />
-              <el-option label="ERROR" value="error" />
-              <el-option label="DEBUG" value="debug" />
-            </el-select>
-            <el-button size="small" :icon="Delete" @click="executionStore.clearCharts">清空</el-button>
-            <el-switch v-model="autoScroll" size="small" active-text="自动滚动" />
-          </div>
-        </div>
-        <div ref="logContainer" class="log-container">
-          <div
-            v-for="log in filteredLogs"
-            :key="log.id"
-            class="log-entry"
-            :class="`log-entry--${log.level}`"
-          >
-            <span class="log-entry__time">{{ log.timestamp.slice(11, 23) }}</span>
-            <span class="log-entry__level">{{ log.level.toUpperCase() }}</span>
-            <span class="log-entry__source">{{ log.source }}</span>
-            <span class="log-entry__msg">{{ log.message }}</span>
-          </div>
-          <div v-if="filteredLogs.length === 0" class="log-empty">暂无日志</div>
-        </div>
-      </div>
+      <ExecutionLogPanel
+        :logs="logs"
+        :dropped-logs="droppedLogs"
+        :level-filter="logLevelFilter"
+        :worker-filter="logWorkerFilter"
+        :workers="executionStore.state?.workerSnapshots ?? []"
+        title="实时日志"
+        show-auto-scroll
+        empty-text="暂无日志"
+        @update:level-filter="executionStore.setLogLevelFilter"
+        @update:worker-filter="executionStore.setLogWorkerFilter"
+        @clear="executionStore.clearLogs"
+      />
     </template>
     </section>
   </div>
@@ -535,25 +407,24 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
-import { VideoPlay, VideoPause, Document, Delete } from '@element-plus/icons-vue'
+import { VideoPlay, VideoPause, Document } from '@element-plus/icons-vue'
 import { useExecutionStore } from '@/stores/execution'
 import { useTaskStore } from '@/stores/task'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import ExecutionStepper from '@/components/execution/ExecutionStepper.vue'
-import MetricCard from '@/components/common/MetricCard.vue'
-import RpsChart from '@/components/charts/RpsChart.vue'
-import ResponseTimeChart from '@/components/charts/ResponseTimeChart.vue'
-import ErrorRateChart from '@/components/charts/ErrorRateChart.vue'
-import ConcurrentChart from '@/components/charts/ConcurrentChart.vue'
-import BaseChart from '@/components/charts/BaseChart.vue'
-import { formatNumber, formatMs, formatPercent, formatDuration } from '@/utils/format'
-import { sparseLineSymbol } from '@/utils/chart'
-import type { TaskStatus, PercentileData, ScriptStatus, WorkerSnapshot } from '@/types'
+import ExecutionLogPanel from '@/components/execution/ExecutionLogPanel.vue'
+import StressReportResults from '@/components/report/StressReportResults.vue'
+import { formatDuration } from '@/utils/format'
+import { formatDeployError } from '@/utils/execution'
+import request from '@/utils/request'
+import type { TaskStatus, ScriptStatus, WorkerSnapshot, ExecutionState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const executionStore = useExecutionStore()
+const { logs, droppedLogs, logWorkerFilter } = storeToRefs(executionStore)
 const taskStore = useTaskStore()
 
 const AUTO_INJECT_KEY = 'jarvan4_execution_auto_inject'
@@ -563,36 +434,18 @@ const taskName = ref('加载中...')
 const taskScriptCount = ref(0)
 const deployBlockError = ref('')
 const injectBlockError = ref('')
-const logLevelFilter = ref('')
-const autoScroll = ref(true)
-const logContainer = ref<HTMLElement | null>(null)
+const selectedScriptIds = ref<string[]>([])
+const logLevelFilter = computed({
+  get: () => executionStore.logLevelFilter,
+  set: (value: string) => executionStore.setLogLevelFilter(value ?? ''),
+})
 const autoInject = ref(localStorage.getItem(AUTO_INJECT_KEY) === 'true')
 
-// 当前选中接口行（点击展开趋势图）
-const selectedApi = ref<PercentileData | null>(null)
-
-function handleApiChange(row: PercentileData | null) {
-  selectedApi.value = row
-  router.replace({ query: { ...route.query, api: row?.api ?? undefined } })
-}
-
-// livePercentiles 每次轮询更新后，同步更新 selectedApi 指向最新对象（保持数值刷新）
-// 同时承担刷新恢复：第一次有数据时从 URL query 还原选中行
-let apiRestored = false
-watch(
-  () => executionStore.livePercentiles,
-  (list) => {
-    if (!list.length) return
-    const targetApi = selectedApi.value?.api ?? (!apiRestored ? route.query.api as string | undefined : undefined)
-    apiRestored = true
-    if (targetApi) {
-      selectedApi.value = list.find(p => p.api === targetApi) ?? null
-    }
-  },
-  { deep: false }
-)
-
 const executionStatus = computed<TaskStatus>(() => executionStore.state?.status || 'idle')
+
+const isTerminalExecution = computed(() =>
+  ['success', 'stopped', 'circuit_broken', 'failed'].includes(executionStatus.value),
+)
 
 const trafficStarted = computed(() => {
   const s = executionStore.state
@@ -657,11 +510,29 @@ const deployPhaseTitle = computed(() =>
   isCapacityDeployFailure.value ? '压测准备' : '脚本部署'
 )
 
-const deployPhaseSubtitle = computed(() =>
-  isCapacityDeployFailure.value
-    ? '校验集群容量与节点资源，通过后再分发脚本'
-    : '将脚本插件分发到 Worker 节点并完成加载'
+const deployPhaseSubtitle = computed(() => {
+  if (isCapacityDeployFailure.value) return '校验集群容量与节点资源，通过后再分发脚本'
+  if (executionStatus.value === 'pending') return '勾选本次要部署的脚本，确认后再下发到 Worker'
+  return '将脚本插件分发到 Worker 节点并完成加载'
+})
+
+const candidateScripts = computed(() => executionStore.state?.scriptSnapshots ?? [])
+
+const allScriptsSelected = computed(() =>
+  candidateScripts.value.length > 0
+  && selectedScriptIds.value.length === candidateScripts.value.length,
 )
+
+const scriptsIndeterminate = computed(() =>
+  selectedScriptIds.value.length > 0
+  && selectedScriptIds.value.length < candidateScripts.value.length,
+)
+
+function toggleSelectAll(checked: boolean | string | number) {
+  selectedScriptIds.value = checked
+    ? candidateScripts.value.map(s => s.scriptId)
+    : []
+}
 
 const hasDeployedScripts = computed(() =>
   (executionStore.state?.scriptStatuses?.length ?? 0) > 0
@@ -672,7 +543,7 @@ const canStartDeploy = computed(() =>
   ['idle', 'success', 'failed', 'stopped'].includes(executionStatus.value)
 )
 const isDeploying = computed(() =>
-  executionStatus.value === 'pending' || executionStatus.value === 'preparing'
+  executionStatus.value === 'preparing'
 )
 const canStop = computed(() =>
   ['pending', 'preparing', 'prepared', 'running'].includes(executionStatus.value)
@@ -694,101 +565,6 @@ const stopButtonLabel = computed(() => {
   if (executionStatus.value === 'running') return '停止注入'
   if (executionStatus.value === 'prepared') return '取消执行'
   return '取消压测'
-})
-
-const filteredLogs = computed(() => {
-  if (!logLevelFilter.value) return executionStore.logs
-  return executionStore.logs.filter(l => l.level === logLevelFilter.value)
-})
-
-// 接口错误率颜色等级
-function errorRateClass(rate: number) {
-  if (rate >= 0.05) return 'err-rate--high'
-  if (rate >= 0.01) return 'err-rate--mid'
-  return 'err-rate--low'
-}
-
-// ── 接口维度趋势图 ────────────────────────────────────────────────────
-function makeLineOption(data: { timestamp: number; value: number }[], color: string, yAxisFormatter?: (v: number) => string) {
-  const sym = sparseLineSymbol(data.length)
-  const tsLabel = (ts: number) => new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTimeString()
-  const AXIS_COLOR  = '#babcbe'
-  const SPLIT_COLOR = '#ececed'
-  const LABEL_COLOR = '#9c9fa3'
-  return {
-    grid: { top: 12, right: 16, bottom: 24, left: 60 },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: data.map(p => tsLabel(p.timestamp)),
-      axisLabel: { color: LABEL_COLOR, fontSize: 11 },
-      axisLine: { lineStyle: { color: AXIS_COLOR } },
-      axisTick: { show: false },
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      axisTick: { show: false },
-      splitLine: { lineStyle: { color: SPLIT_COLOR } },
-      axisLabel: { color: LABEL_COLOR, fontSize: 11, formatter: yAxisFormatter },
-    },
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: '#fff',
-      borderColor: '#e1e2e3',
-      borderWidth: 1,
-      textStyle: { color: '#22252b', fontSize: 12 },
-      formatter: yAxisFormatter ? (params: any) => {
-        const p = params[0]
-        return `<span style="color:#9c9fa3;font-size:11px">${p.axisValue}</span><br/><b style="color:${color}">${yAxisFormatter(p.value)}</b>`
-      } : undefined,
-    },
-    series: [{
-      type: 'line',
-      data: data.map(p => p.value),
-      smooth: true,
-      symbol: sym.symbol,
-      symbolSize: sym.symbolSize,
-      lineStyle: { color, width: 2 },
-      areaStyle: {
-        color: {
-          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: color.replace(')', ',0.18)').replace('rgb', 'rgba') },
-            { offset: 1, color: color.replace(')', ',0)').replace('rgb', 'rgba') },
-          ],
-        },
-      },
-    }],
-  }
-}
-
-const apiRpsChartOption = computed(() =>
-  selectedApi.value?.rpsData ? makeLineOption(selectedApi.value.rpsData, '#3871dc', v => String(Math.ceil(v))) : {}
-)
-const apiRtChartOption = computed(() =>
-  selectedApi.value?.responseTimeData ? makeLineOption(selectedApi.value.responseTimeData, '#ff7f40', v => v.toFixed(2) + ' ms') : {}
-)
-const apiErrChartOption = computed(() =>
-  selectedApi.value?.errorRateData ? makeLineOption(selectedApi.value.errorRateData, '#e0226e', v => v.toFixed(2) + '%') : {}
-)
-
-// ── 错误分析饼图 ──────────────────────────────────────────────────────
-const errorPieOption = computed(() => {
-  const errors = executionStore.liveErrors
-  if (!errors.length) return {}
-  return {
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', right: 10, top: 'middle' },
-    series: [{
-      type: 'pie',
-      radius: ['40%', '70%'],
-      center: ['35%', '50%'],
-      data: errors.map(e => ({ name: `[${e.code}] ${e.message}`, value: e.count })),
-      itemStyle: { borderRadius: 4 },
-      label: { show: false },
-    }],
-  }
 })
 
 onMounted(async () => {
@@ -830,17 +606,15 @@ onUnmounted(() => {
   executionStore.stopTimers()
 })
 
-watch(() => executionStore.logs.length, async () => {
-  if (!autoScroll.value) return
-  await nextTick()
-  if (logContainer.value) {
-    logContainer.value.scrollTop = logContainer.value.scrollHeight
-  }
-})
-
 watch(autoInject, (val) => {
   localStorage.setItem(AUTO_INJECT_KEY, String(val))
 })
+
+watch(candidateScripts, (list) => {
+  if (executionStatus.value === 'pending' && list.length && selectedScriptIds.value.length === 0) {
+    selectedScriptIds.value = list.map(s => s.scriptId)
+  }
+}, { immediate: true })
 
 watch(executionStatus, async (status, prevStatus) => {
   if (status === 'prepared' && (prevStatus === 'pending' || prevStatus === 'preparing')) {
@@ -866,7 +640,8 @@ watch(executionStatus, async (status, prevStatus) => {
       ElMessage.warning('流量注入已停止')
     }
   } else if (status === 'failed') {
-    ElMessage.error(executionStore.state?.errorMsg || '执行失败')
+    const raw = executionStore.state?.errorMsg || '执行失败'
+    ElMessage.error(formatDeployError(raw).title)
   } else if (status === 'circuit_broken') {
     ElMessage.error(executionStore.state?.errorMsg || '熔断保护已触发，压测已自动停止')
   }
@@ -886,6 +661,7 @@ async function handleStart() {
     if (executionStatus.value !== 'idle') {
       executionStore.reset()
     }
+    selectedScriptIds.value = []
     await executionStore.startExecution(taskId.value)
     if (executionStore.state?.id) {
       router.replace({ query: { ...route.query, execId: executionStore.state.id, autostart: undefined } })
@@ -895,6 +671,34 @@ async function handleStart() {
     const msg = err?.response?.data?.message || '启动压测失败'
     deployBlockError.value = msg
     ElMessage.error(msg)
+  }
+}
+
+async function handleDeploy() {
+  const id = executionStore.state?.id
+  if (!id) return
+  if (selectedScriptIds.value.length === 0) {
+    ElMessage.warning('请至少选择一个脚本')
+    return
+  }
+  deployBlockError.value = ''
+  executionStore.loading = true
+  try {
+    // 直接打接口，不经过 store action：避免 Vite/Pinia HMR 仍持有旧 store 实例时
+    // 出现 executionStore.deployScripts is not a function
+    const res = await request.post(`/executions/${id}/deploy`, { scriptIds: selectedScriptIds.value })
+    const executionState = res.data.data as ExecutionState
+    await executionStore.resumeExecution(id)
+    if (executionState?.status === 'failed' || executionStore.state?.status === 'failed') {
+      deployBlockError.value = executionState?.errorMsg || executionStore.state?.errorMsg || '部署失败'
+    }
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { message?: string } }; message?: string }
+    const msg = err?.response?.data?.message || err?.message || '部署失败'
+    deployBlockError.value = msg
+    ElMessage.error(msg)
+  } finally {
+    executionStore.loading = false
   }
 }
 
@@ -989,6 +793,11 @@ const scriptDeploySummaryClass = computed(() => {
 .execution-error-alert,
 .deploy-block-alert {
   margin: 0;
+
+  :deep(.el-alert__description) {
+    white-space: pre-line;
+    line-height: 1.6;
+  }
 }
 
 .phase-panel {
@@ -1204,6 +1013,59 @@ const scriptDeploySummaryClass = computed(() => {
   }
 }
 
+.script-select-panel {
+  background: $bg-card;
+  border-radius: $border-radius;
+  padding: 20px 24px;
+  box-shadow: $shadow-sm;
+  border: 1px solid $border-color-light;
+
+  &__header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  &__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  &__hint {
+    font-size: 12px;
+    color: $text-secondary;
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+  }
+}
+
+.script-select-item {
+  display: flex;
+  align-items: center;
+
+  &__name {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-weight: 600;
+    font-size: 13px;
+    margin-right: 8px;
+  }
+
+  &__hash {
+    font-size: 12px;
+    color: $color-primary;
+    background: $color-primary-light-9;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+}
+
 // ── Pending 初始化面板 ─────────────────────────────────────────────────
 .init-panel {
   background: $bg-card;
@@ -1275,7 +1137,11 @@ const scriptDeploySummaryClass = computed(() => {
     font-family: 'SFMono-Regular', Consolas, monospace;
     padding: 1px 8px;
     border-radius: 4px;
-    flex-shrink: 0;
+    flex-shrink: 1;
+    max-width: 50%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   // 子行：tag 列表，左侧与标题文字对齐（icon宽20 + gap12 = 32px）
@@ -1330,6 +1196,9 @@ const scriptDeploySummaryClass = computed(() => {
     .init-step__label { color: $color-danger; }
     .init-step__detail,
     .init-step__tag { background: rgba($color-danger, 0.08); color: $color-danger; }
+    .init-step__detail {
+      white-space: nowrap;
+    }
   }
 }
 
@@ -1453,16 +1322,14 @@ const scriptDeploySummaryClass = computed(() => {
     color: $text-secondary;
   }
 
-  &__error {
+  &__alert {
     margin-top: 8px;
     margin-left: 28px;
-    padding: 6px 10px;
-    font-size: 12px;
-    color: $color-danger;
-    background: rgba($color-danger, 0.06);
-    border-radius: 4px;
-    font-family: 'SFMono-Regular', Consolas, monospace;
-    word-break: break-all;
+
+    :deep(.el-alert__description) {
+      white-space: pre-line;
+      line-height: 1.6;
+    }
   }
 
   // 状态颜色：失败红、就绪绿、下载中橙、等待灰
@@ -1539,11 +1406,14 @@ const scriptDeploySummaryClass = computed(() => {
     font-variant-numeric: tabular-nums;
   }
 
-  &__error {
+  &__alert {
     flex: 1 1 100%;
-    color: $color-danger;
-    font-family: 'SFMono-Regular', Consolas, monospace;
-    word-break: break-all;
+    margin-top: 4px;
+
+    :deep(.el-alert__description) {
+      white-space: pre-line;
+      line-height: 1.6;
+    }
   }
 
   &--ready &__status { color: $color-success; font-weight: 600; }
@@ -1577,6 +1447,10 @@ const scriptDeploySummaryClass = computed(() => {
   background: #1a1d23;
   border-radius: $border-radius;
   overflow: hidden;
+
+  &__dropped-alert {
+    margin: 12px 16px 0;
+  }
 
   &__header {
     display: flex;

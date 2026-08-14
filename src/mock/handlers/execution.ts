@@ -103,10 +103,10 @@ function getElapsed(record: ExecutionRecord): number {
 function simulateVuMetrics(elapsed: number, config: ScenarioConfig): MetricsSummary {
   // 按步骤累计时长确定当前并发（含阶段内 rampTime 线性爬升）
   let concurrent = 0
-  if (config.steps?.length) {
+  if (config.vuSteps?.length) {
     let acc = 0
     let prevConcurrent = 0
-    for (const step of config.steps) {
+    for (const step of config.vuSteps) {
       const stepTotal = (step.rampTime ?? 0) + step.duration
       if (elapsed < acc + stepTotal) {
         const localElapsed = elapsed - acc
@@ -310,9 +310,9 @@ export const executionHandlers: MockHandler[] = [
       // 从 mockTasks 查找任务配置
       const task = mockTasks.find(t => t.id === taskId)
       const scenarioConfig: ScenarioConfig = task?.scenarioConfig ?? {
-        mode: 'step',
+        mode: 'vu',
         duration: 120,
-        steps: [{ concurrent: 100, duration: 100, rampTime: 20 }],
+        vuSteps: [{ concurrent: 100, duration: 100, rampTime: 20 }],
       }
 
       // 执行时快照：从 mockScripts 查最新 commitHash
@@ -326,19 +326,6 @@ export const executionHandlers: MockHandler[] = [
         }
       })
 
-      // 脚本部署状态（preparing 阶段展示，初始全部 pending）
-      const scriptStatuses: ScriptStatusInfo[] = scriptSnapshots.map(s => {
-        const scriptData = mockScripts.find(ms => ms.id === s.scriptId)
-        return {
-          scriptId: s.scriptId,
-          scriptName: s.scriptName,
-          commitHash: s.commitHash,
-          artifactUrl: scriptData?.artifactUrl || '',
-          status: 'pending' as const,
-        }
-      })
-
-      // 初始化步骤（pending 阶段）
       const initSteps = [
         { key: 'select_worker', label: '选定可用 Worker 节点', status: 'waiting' as const, detail: '' },
         { key: 'download_script', label: '下发脚本产物到 Worker', status: 'waiting' as const, detail: '' },
@@ -354,12 +341,10 @@ export const executionHandlers: MockHandler[] = [
           status: 'pending',
           startTime: now,
           elapsedSeconds: 0,
-          // 透传场景上下文
           scenarioMode: scenarioConfig.mode,
           targetRps: scenarioConfig.targetRps,
           scriptSnapshots,
           initSteps,
-          scriptStatuses,
         },
         startTime: Date.now(),
         logOffset: 0,
@@ -367,49 +352,66 @@ export const executionHandlers: MockHandler[] = [
         scenarioConfig,
       }
       executions.set(id, record)
+      return ok(record.execution)
+    },
+  },
+  {
+    method: 'POST',
+    url: '/executions/:id/deploy',
+    handler: ({ params, body }) => {
+      const record = executions.get(params.id)
+      if (!record) return fail('执行记录不存在', 404)
+      if (record.execution.status !== 'pending') {
+        return fail(`当前状态 ${record.execution.status} 无法部署脚本`, 400)
+      }
+      const reqIds = (body as { scriptIds?: string[] } | undefined)?.scriptIds ?? []
+      let selected = record.execution.scriptSnapshots ?? []
+      if (reqIds.length) {
+        const want = new Set(reqIds)
+        selected = selected.filter(s => want.has(s.scriptId))
+      }
+      if (!selected.length) return fail('请至少选择一个脚本后再部署', 400)
 
-      // 模拟初始化阶段：各步骤逐步完成，最终转 running
-      const scriptNames = scriptSnapshots.map(s => `${s.scriptName}@${s.commitHash.slice(0, 8)}`)
-      // 从在线节点中随机选取 2~3 台
+      record.execution.scriptSnapshots = selected
+      record.execution.scriptStatuses = selected.map(s => {
+        const scriptData = mockScripts.find(ms => ms.id === s.scriptId)
+        return {
+          scriptId: s.scriptId,
+          scriptName: s.scriptName,
+          commitHash: s.commitHash,
+          artifactUrl: scriptData?.artifactUrl || '',
+          status: 'pending' as const,
+        }
+      })
+      record.execution.status = 'preparing'
+
+      const scriptNames = selected.map(s => `${s.scriptName}@${s.commitHash.slice(0, 8)}`)
       const onlineWorkers = mockWorkers.filter(w => w.status === 'online')
       const pickCount = Math.min(onlineWorkers.length, Math.floor(Math.random() * 2) + 2)
       const pickedWorkers = onlineWorkers.slice(0, pickCount)
       const workerItems = pickedWorkers.map(w => `${w.hostname}  ${w.ip}`)
+      const id = params.id
 
       setTimeout(() => {
         const r = executions.get(id)
-        if (!r || r.execution.status !== 'pending') return
-        r.execution.initSteps![0] = { key: 'select_worker', label: '选定可用 Worker 节点', status: 'running', detail: '' }
-      }, 200)
-      setTimeout(() => {
-        const r = executions.get(id)
-        if (!r || r.execution.status !== 'pending') return
+        if (!r || r.execution.status !== 'preparing') return
         r.execution.initSteps![0] = { key: 'select_worker', label: '选定可用 Worker 节点', status: 'done', detail: `已选定 ${pickedWorkers.length} 个节点`, items: workerItems }
         r.execution.initSteps![1] = { key: 'download_script', label: '下发脚本产物到 Worker', status: 'running', detail: '' }
-        // 进入 preparing 阶段：脚本开始下载
-        r.execution.status = 'preparing'
         r.execution.scriptStatuses!.forEach(s => { s.status = 'downloading' })
-      }, 700)
+      }, 400)
       setTimeout(() => {
         const r = executions.get(id)
         if (!r || r.execution.status !== 'preparing') return
-        r.execution.initSteps![1] = { key: 'download_script', label: '下发脚本产物到 Worker', status: 'done', detail: `${scriptNames.length} 个脚本`, items: scriptNames.length ? scriptNames : ['（无绑定脚本）'] }
+        r.execution.initSteps![1] = { key: 'download_script', label: '下发脚本产物到 Worker', status: 'done', detail: `${scriptNames.length} 个脚本`, items: scriptNames }
         r.execution.initSteps![2] = { key: 'load_plugin', label: '加载脚本插件（plugin.Open）', status: 'running', detail: '' }
-        // 脚本下载完成
         r.execution.scriptStatuses!.forEach(s => { s.status = 'ready' })
-      }, 1400)
+      }, 1100)
       setTimeout(() => {
         const r = executions.get(id)
         if (!r || r.execution.status !== 'preparing') return
         r.execution.initSteps![2] = { key: 'load_plugin', label: '加载脚本插件（plugin.Open）', status: 'done', detail: '全部 Worker 加载成功' }
-        // 步骤 4 "开始注入流量" 保持 waiting，等用户手动触发
-      }, 2000)
-      // 部署完成：转入 prepared 状态，等用户手动 start
-      setTimeout(() => {
-        const r = executions.get(id)
-        if (!r || r.execution.status !== 'preparing') return
         r.execution.status = 'prepared'
-      }, 2500)
+      }, 1800)
 
       return ok(record.execution)
     },
@@ -486,26 +488,30 @@ export const executionHandlers: MockHandler[] = [
   {
     method: 'GET',
     url: '/executions/:id/logs',
-    handler: ({ params }) => {
+    handler: ({ params, query }) => {
       const record = executions.get(params.id)
-      if (!record) return ok([])
+      if (!record) return ok({ logs: [], droppedLogs: 0 })
       const config = record.scenarioConfig
       const isRps = config.mode === 'rps'
       const pool = isRps ? getRpsLogMessages(config) : vuLogMessages
+      const workerFilter = typeof query.worker_id === 'string' ? query.worker_id : ''
 
       const newLogs: LogEntry[] = []
       const count = Math.floor(Math.random() * 4) + 1
       for (let i = 0; i < count; i++) {
         const template = pool[Math.floor(Math.random() * pool.length)]
+        const workerId = workerFilter
+          || (isRps ? 'rate-ctrl-' + (Math.floor(Math.random() * 4) + 1) : 'worker-' + (Math.floor(Math.random() * 8) + 1))
         newLogs.push({
           id: genId(),
           timestamp: new Date().toISOString(),
           level: template.level as LogEntry['level'],
           message: template.msg,
-          source: isRps ? 'rate-ctrl-' + (Math.floor(Math.random() * 4) + 1) : 'worker-' + (Math.floor(Math.random() * 8) + 1),
+          source: workerId,
+          workerId,
         })
       }
-      return ok(newLogs)
+      return ok({ logs: newLogs, droppedLogs: Math.floor(Math.random() * 20) })
     },
   },
   // ── 接口维度实时指标 ──────────────────────────────────────────────────
