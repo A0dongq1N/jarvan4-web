@@ -60,12 +60,9 @@
             {{ formatTime(row.startTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
-            <div class="row-actions">
-              <el-button size="small" type="primary" @click="$router.push(`/report/${row.id}`)">详情</el-button>
-              <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
-            </div>
+            <el-button size="small" type="primary" @click="$router.push(`/report/${row.id}`)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -80,35 +77,21 @@
         />
       </div>
     </div>
-
-    <ConfirmDialog
-      v-model="deleteVisible"
-      title="删除报告"
-      :message="`确认删除报告「${deletingReport?.taskName}」？`"
-      type="danger"
-      confirm-text="删除"
-      @confirm="doDelete"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { Search } from '@element-plus/icons-vue'
-import { notifyError, notifySuccess, getErrorMessage } from '@/utils/feedback'
 import { useReportStore } from '@/stores/report'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
-import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { formatNumber, formatMs, formatPercent, formatDuration, formatTime } from '@/utils/format'
-import type { Report } from '@/types'
 
 const reportStore = useReportStore()
 const keyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
-const deleteVisible = ref(false)
-const deletingReport = ref<Report | null>(null)
 
 onMounted(() => loadReports())
 
@@ -118,22 +101,6 @@ async function loadReports() {
     pageSize: pageSize.value,
     keyword: keyword.value,
   })
-}
-
-function confirmDelete(report: Report) {
-  deletingReport.value = report
-  deleteVisible.value = true
-}
-
-async function doDelete() {
-  if (!deletingReport.value) return
-  try {
-    await reportStore.deleteReport(deletingReport.value.id)
-    notifySuccess('报告已删除')
-    loadReports()
-  } catch (e) {
-    notifyError(getErrorMessage(e), '删除失败')
-  }
 }
 </script>
 
@@ -158,13 +125,5 @@ async function doDelete() {
   border-top: 1px solid $border-color-light;
   display: flex;
   justify-content: flex-end;
-}
-
-.row-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: nowrap;
-  white-space: nowrap;
 }
 </style>

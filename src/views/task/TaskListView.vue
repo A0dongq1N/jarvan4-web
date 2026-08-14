@@ -69,20 +69,7 @@
                 @click="goExecution(row.id)"
               >执行</el-button>
               <el-button size="small" @click="goDetail(row.id)">详情</el-button>
-              <el-dropdown size="small" @command="(cmd: string) => handleMore(cmd, row)">
-                <el-button size="small">
-                  更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item
-                      v-if="row.lastExecutionId"
-                      command="report"
-                    >查看报告</el-dropdown-item>
-                    <el-dropdown-item command="delete" style="color:#e0226e">删除</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
             </div>
           </template>
         </el-table-column>
@@ -135,10 +122,9 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, ArrowDown } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 import { notifyError, notifySuccess, notifyWarning, getErrorMessage } from '@/utils/feedback'
 import { useTaskStore } from '@/stores/task'
-import { useReportStore } from '@/stores/report'
 import { useProjectStore } from '@/stores/project'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
@@ -148,7 +134,6 @@ import type { StressTask } from '@/types'
 
 const router = useRouter()
 const taskStore = useTaskStore()
-const reportStore = useReportStore()
 const projectStore = useProjectStore()
 
 const searchKeyword = ref('')
@@ -234,25 +219,6 @@ function goDetail(id: string) {
 
 function goExecution(taskId: string) {
   router.push(`/execution/${taskId}?autostart=1`)
-}
-
-async function handleMore(cmd: string, task: StressTask) {
-  if (cmd === 'report') {
-    await goReport(task)
-  } else if (cmd === 'delete') {
-    confirmDelete(task)
-  }
-}
-
-async function goReport(task: StressTask) {
-  // Find report for this task
-  await reportStore.fetchList({ keyword: task.name })
-  const report = reportStore.list[0]
-  if (report) {
-    router.push(`/report/${report.id}`)
-  } else {
-    router.push('/report')
-  }
 }
 
 function confirmDelete(task: StressTask) {

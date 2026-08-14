@@ -146,8 +146,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search, SwitchButton, Delete } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import { ElMessageBox } from 'element-plus'
 import { notifyError, notifySuccess, getErrorMessage } from '@/utils/feedback'
+import { confirmDanger } from '@/utils/confirm'
 import { useProjectStore } from '@/stores/project'
 import { useAuthStore } from '@/stores/auth'
 import type { Project } from '@/types'
@@ -175,11 +175,11 @@ function enterProject(project: Project) {
 
 // 删除项目
 async function handleDelete(project: Project) {
-  await ElMessageBox.confirm(
+  const ok = await confirmDanger(
     `确定删除项目「${project.name}」？该操作不可恢复。`,
-    '删除确认',
-    { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' }
+    { title: '删除确认', confirmText: '删除' },
   )
+  if (!ok) return
   try {
     await projectStore.deleteProject(project.id)
     notifySuccess(`项目「${project.name}」已删除`)

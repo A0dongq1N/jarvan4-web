@@ -73,6 +73,7 @@ import { ref, watch, nextTick, computed } from 'vue'
 import { Delete } from '@element-plus/icons-vue'
 import type { LogEntry, WorkerSnapshot } from '@/types'
 import { formatLogTime } from '@/utils/format'
+import { confirmDanger } from '@/utils/confirm'
 
 const WORKER_COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#22d3ee', '#fb7185', '#c084fc']
 
@@ -149,7 +150,12 @@ function onWorkerChange(value: string) {
   emit('update:workerFilter', value ?? '')
 }
 
-function onClear() {
+async function onClear() {
+  const ok = await confirmDanger('确认清空当前日志列表？', {
+    title: '清空确认',
+    confirmText: '清空',
+  })
+  if (!ok) return
   emit('clear')
 }
 

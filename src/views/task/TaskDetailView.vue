@@ -366,7 +366,7 @@
                   <el-button
                     size="small" type="danger" plain :icon="Delete"
                     style="width:32px;padding:0"
-                    @click="form.scenarioConfig.circuitBreaker.rules.splice(i, 1)"
+                    @click="removeCircuitRule(i)"
                   />
                 </div>
                 <el-button
@@ -499,6 +499,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { notifyError, notifySuccess, notifyWarning, getErrorMessage } from '@/utils/feedback'
+import { confirmDanger } from '@/utils/confirm'
 import { Plus, Delete, Document, Search, WarningFilled, Close } from '@element-plus/icons-vue'
 import { useTaskStore } from '@/stores/task'
 import { useScriptStore } from '@/stores/script'
@@ -775,7 +776,11 @@ function addStep() {
 }
 
 function removeStep(i: number) {
-  form.scenarioConfig.vuSteps?.splice(i, 1)
+  void (async () => {
+    const ok = await confirmDanger('确认删除该 VU 阶梯？', { title: '删除确认' })
+    if (!ok) return
+    form.scenarioConfig.vuSteps?.splice(i, 1)
+  })()
 }
 
 function addRpsStep() {
@@ -791,8 +796,12 @@ function addRpsStep() {
 function removeRpsStep(i: number) {
   const steps = form.scenarioConfig.rpsSteps
   if (!steps || steps.length <= 1) return
-  steps.splice(i, 1)
-  syncScenePeakRps()
+  void (async () => {
+    const ok = await confirmDanger('确认删除该 RPS 阶梯？', { title: '删除确认' })
+    if (!ok) return
+    steps.splice(i, 1)
+    syncScenePeakRps()
+  })()
 }
 
 async function selectScript(script: any) {
@@ -830,11 +839,21 @@ async function onWeightChange(scriptId: string, weight: number) {
 
 async function unbindScript(scriptId: string) {
   if (!task.value) return
-  await taskStore.unbindScript(task.value.id, scriptId)
-  form.scripts = [...(taskStore.currentTask?.scripts || [])]
-  syncScenePeakRps()
-  if (expandedEnvScript.value === scriptId) expandedEnvScript.value = null
-  notifySuccess('脚本已解绑')
+  const name = form.scripts.find((s) => s.scriptId === scriptId)?.scriptName || scriptId
+  const ok = await confirmDanger(
+    `确认解绑脚本「${name}」？解绑后需重新绑定才能使用。`,
+    { title: '解绑确认', confirmText: '解绑' },
+  )
+  if (!ok) return
+  try {
+    await taskStore.unbindScript(task.value.id, scriptId)
+    form.scripts = [...(taskStore.currentTask?.scripts || [])]
+    syncScenePeakRps()
+    if (expandedEnvScript.value === scriptId) expandedEnvScript.value = null
+    notifySuccess('脚本已解绑')
+  } catch (e) {
+    notifyError(getErrorMessage(e), '解绑失败')
+  }
 }
 
 function openEnvEditor(s: any) {
@@ -854,7 +873,11 @@ function addEnvRow() {
 }
 
 function removeEnvRow(i: number) {
-  editingEnvRows.value.splice(i, 1)
+  void (async () => {
+    const ok = await confirmDanger('确认删除该环境变量？', { title: '删除确认' })
+    if (!ok) return
+    editingEnvRows.value.splice(i, 1)
+  })()
 }
 
 function syncSceneEnvRowsFromConfig(envVars?: Record<string, string>) {
@@ -875,7 +898,19 @@ function addSceneEnvRow() {
 }
 
 function removeSceneEnvRow(i: number) {
-  sceneEnvRows.value.splice(i, 1)
+  void (async () => {
+    const ok = await confirmDanger('确认删除该场景环境变量？', { title: '删除确认' })
+    if (!ok) return
+    sceneEnvRows.value.splice(i, 1)
+  })()
+}
+
+function removeCircuitRule(i: number) {
+  void (async () => {
+    const ok = await confirmDanger('确认删除该熔断规则？', { title: '删除确认' })
+    if (!ok) return
+    form.scenarioConfig.circuitBreaker.rules.splice(i, 1)
+  })()
 }
 
 async function saveEnvVars(scriptId: string) {

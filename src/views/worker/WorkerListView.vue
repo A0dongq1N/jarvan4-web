@@ -164,8 +164,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
-import { ElMessageBox } from 'element-plus'
 import { notifyError, notifySuccess, getErrorMessage } from '@/utils/feedback'
+import { confirmDanger } from '@/utils/confirm'
 import { Refresh, MoreFilled, Monitor, VideoPlay } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { formatHeartbeatAgo } from '@/utils/format'
@@ -319,14 +319,18 @@ function stopTimers() {
 
 async function handleCommand(cmd: string, w: WorkerNode) {
   if (cmd === 'offline') {
-    await ElMessageBox.confirm(`确定将节点 ${w.hostname} 下线？`, '下线节点', {
-      confirmButtonText: '确定下线',
-      cancelButtonText: '取消',
-      type: 'warning',
+    const ok = await confirmDanger(`确定将节点 ${w.hostname} 下线？`, {
+      title: '下线节点',
+      confirmText: '确定下线',
     })
-    await request.post(`/workers/${w.workerId}/offline`)
-    notifySuccess(`节点 ${w.hostname} 已下线`)
-    load()
+    if (!ok) return
+    try {
+      await request.post(`/workers/${w.workerId}/offline`)
+      notifySuccess(`节点 ${w.hostname} 已下线`)
+      load()
+    } catch (e) {
+      notifyError(getErrorMessage(e), '下线失败')
+    }
   }
 }
 
