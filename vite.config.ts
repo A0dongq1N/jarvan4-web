@@ -49,6 +49,24 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    // 组件样式由 unplugin 在转换 SFC 时注入，依赖扫描扫不到。
+    // 漏掉后预构建缓存被清掉，旧模块仍指向已删除文件，浏览器会一直拿到 504。
+    include: [
+      'element-plus/es/components/base/style/index',
+      'element-plus/es/components/progress/style/index',
+      'element-plus/es/components/button/style/index',
+      'element-plus/es/components/icon/style/index',
+      'element-plus/es/components/tag/style/index',
+      'element-plus/es/components/dropdown/style/index',
+      'element-plus/es/components/dropdown-menu/style/index',
+      'element-plus/es/components/dropdown-item/style/index',
+      'element-plus/es/components/radio-group/style/index',
+      'element-plus/es/components/radio-button/style/index',
+      'element-plus/es/components/input/style/index',
+      'element-plus/es/components/input-number/style/index',
+    ],
+  },
   server: {
     host: true,
     port: 5173,
