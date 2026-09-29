@@ -48,7 +48,7 @@ export interface UserInfo {
   username: string
   displayName: string
   avatar?: string
-  role: 'admin' | 'user'
+  role: 'admin' | 'operator' | 'viewer'
 }
 
 // 任务相关
@@ -112,9 +112,17 @@ export interface VuStepConfig {
 }
 
 export interface RpsStepConfig {
+  /** 派生：sum(scriptTargets.rps)，保存前由前端重算 */
   rps: number
   duration: number   // 稳定持续时长（秒），不含爬坡
-  rampTime: number   // 从上一阶段线性爬升到本阶段 rps 所需时间（秒），0 表示瞬变
+  rampTime: number   // 从上一阶段线性爬升到本阶段合计 rps 所需时间（秒），0 表示瞬变
+  /** 每阶段 × 每脚本绝对 RPS（RPS 模式必填） */
+  scriptTargets: ScriptRpsTarget[]
+}
+
+export interface ScriptRpsTarget {
+  scriptId: string
+  rps: number
 }
 
 export interface TaskScript {
@@ -172,7 +180,7 @@ export interface Script {
   language: ScriptLanguage
   description?: string
   commitHash: string       // 最新发布版本的 Git commit hash
-  artifactUrl: string      // 对象存储 .so 路径
+  artifactUrl: string      // 对象存储脚本二进制路径
   commitMsg: string        // commit message
   author: string           // 提交者
   // 源码仓库信息（CI 发布时透传），用于在前端展示"查看源码"链接
@@ -383,6 +391,14 @@ export interface WorkerNode {
   workerBuildId?: string
   declaredMaxRps?: number
   effectiveMaxRps?: number
+}
+
+export interface WorkerListData extends PageResult<WorkerNode> {
+  busyCount: number
+  onlineCount: number
+  offlineCount: number
+  usedConcurrency: number
+  totalConcurrency: number
 }
 
 // 项目

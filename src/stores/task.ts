@@ -47,11 +47,10 @@ export const useTaskStore = defineStore('task', () => {
     total.value--
   }
 
-  async function bindScript(taskId: string, scriptId: string, weight: number, targetRps?: number) {
+  async function bindScript(taskId: string, scriptId: string, weight: number, _targetRps?: number) {
     await request.post(`/tasks/${taskId}/scripts`, {
       scriptId,
-      weight,
-      targetRps: targetRps ?? weight,
+      weight: weight > 0 ? weight : 100,
     })
     await fetchById(taskId)
   }

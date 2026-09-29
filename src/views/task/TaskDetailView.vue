@@ -4,13 +4,13 @@
       :title="isCreate ? '新建任务' : (task?.name || '任务详情')"
       :back="true"
     >
-      <el-button type="primary" :loading="saving" @click="handleSave">
+      <el-button v-if="canEdit" type="primary" :loading="saving" @click="handleSave">
         {{ isCreate ? '创建任务' : '保存修改' }}
       </el-button>
       <el-button v-if="!isCreate && activeExecution" type="warning" @click="goMonitor(activeExecution.id)">
         查看监控
       </el-button>
-      <el-button v-if="!isCreate" type="success" @click="goExecution">执行压测</el-button>
+      <el-button v-if="!isCreate && canRun" type="success" @click="goExecution">执行压测</el-button>
     </PageHeader>
 
     <el-alert
@@ -67,9 +67,9 @@
           </div>
 
           <div v-if="isRpsMode" class="scripts-rps-summary">
-            <span>总目标 RPS（峰值）</span>
-            <strong>{{ totalScriptTargetRps }}</strong>
-            <span class="scripts-rps-summary__hint">= 各脚本目标 RPS 之和，场景阶梯末阶段自动对齐此值</span>
+            <span>矩阵峰值 RPS</span>
+            <strong>{{ peakMatrixRps || '—' }}</strong>
+            <span class="scripts-rps-summary__hint">= 各阶段「脚本 RPS 之和」的最大值，在「场景配置」阶梯矩阵中编辑</span>
           </div>
 
           <div class="scripts-header">
@@ -100,15 +100,7 @@
                 </div>
                 <div class="script-binding-item__actions">
                   <div v-if="isRpsMode" class="script-binding-item__weight">
-                    <span>目标 RPS</span>
-                    <el-input-number
-                      :model-value="scriptTargetRps(s)"
-                      :min="1"
-                      :max="100000"
-                      :step="100"
-                      style="width: 160px; margin: 0 12px"
-                      @change="(val: number | undefined) => onTargetRpsChange(s.scriptId, val ?? 0)"
-                    />
+                    <strong style="font-variant-numeric: tabular-nums">{{ scriptPeakFromMatrix(s.scriptId) || '—' }}/qps</strong>
                   </div>
                   <div v-else class="script-binding-item__weight">
                     <span>权重</span>
@@ -235,69 +227,100 @@
             <template v-if="form.scenarioConfig.mode === 'rps'">
               <div class="rps-scene-hint">
                 <span>峰值 RPS</span>
-                <strong>{{ totalScriptTargetRps || '—' }}</strong>
+                <strong>{{ peakMatrixRps || '—' }}</strong>
                 <span class="rps-scene-hint__unit">req/s</span>
                 <span class="rps-scene-hint__desc">
-                  由各脚本目标 RPS 汇总；末阶段自动对齐峰值，前几阶段配置爬升曲线
+                  每阶段为每个脚本填写绝对 RPS；阶段合计自动求和，峰值取各阶段合计的最大值
                 </span>
-                <el-button v-if="!isCreate" size="small" text type="primary" @click="activeTab = 'scripts'">
-                  去配置脚本
-                </el-button>
               </div>
               <el-alert
                 v-if="form.scripts.length === 0"
                 type="warning"
                 :closable="false"
                 show-icon
-                title="请先在「脚本绑定」页添加脚本并配置各脚本目标 RPS"
+                title="请先在「脚本绑定」页添加脚本，再配置 RPS 矩阵"
                 style="margin-bottom: 16px"
               />
 
-              <el-form-item label="RPS 阶梯配置">
-                <div class="step-config">
-                  <div
-                    v-for="(step, i) in form.scenarioConfig.rpsSteps"
-                    :key="i"
-                    class="step-item step-item--rps"
-                  >
-                    <span class="step-item__label">阶段 {{ i + 1 }}</span>
-                    <div class="step-item__group step-item__group--rps">
-                      <template v-if="i === (form.scenarioConfig.rpsSteps?.length ?? 0) - 1">
-                        <span class="rps-peak-readonly">{{ totalScriptTargetRps || '—' }}</span>
-                        <span class="step-item__unit">req/s</span>
-                        <el-tag size="small" type="info">峰值（脚本汇总）</el-tag>
-                      </template>
-                      <template v-else>
-                        <el-input-number
-                          v-model="step.rps"
-                          :min="1"
-                          :max="Math.max(1, totalScriptTargetRps - 1)"
-                          placeholder="目标 RPS"
-                          controls-position="right"
-                          class="step-input step-input--lg"
-                        />
-                        <span class="step-item__unit">req/s</span>
-                      </template>
-                    </div>
-                    <div class="step-item__group">
-                      <span class="step-item__hint">{{ i === 0 ? '从 0 爬坡' : '爬坡' }}</span>
-                      <el-input-number v-model="step.rampTime" :min="0" :max="step.duration" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
-                      <span class="step-item__unit">秒</span>
-                    </div>
-                    <div class="step-item__group">
-                      <span class="step-item__hint">稳定</span>
-                      <el-input-number v-model="step.duration" :min="10" placeholder="秒" controls-position="right" class="step-input step-input--sm" />
-                      <span class="step-item__unit">秒</span>
-                    </div>
-                    <el-button size="small" type="danger" plain :icon="Delete" class="step-item__delete" @click="removeRpsStep(i)" />
-                  </div>
-                  <el-button size="small" :icon="Plus" @click="addRpsStep">添加阶段</el-button>
+              <el-form-item label="RPS 阶梯矩阵">
+                <div class="rps-matrix-table-wrap">
+                  <table class="rps-matrix-table">
+                    <thead>
+                      <tr>
+                        <th class="rps-matrix-table__stage-col">阶段</th>
+                        <th
+                          v-for="s in form.scripts"
+                          :key="s.scriptId"
+                          class="rps-matrix-table__script-col"
+                          :title="s.scriptName"
+                        >{{ s.scriptName }}</th>
+                        <th class="rps-matrix-table__total-col">合计 (req/s)</th>
+                        <th class="rps-matrix-table__ramp-col">爬坡 (秒)</th>
+                        <th class="rps-matrix-table__dur-col">稳定 (秒)</th>
+                        <th class="rps-matrix-table__op-col"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="(step, i) in form.scenarioConfig.rpsSteps"
+                        :key="i"
+                      >
+                        <td class="rps-matrix-table__stage-col">阶段 {{ i + 1 }}</td>
+                        <td
+                          v-for="s in form.scripts"
+                          :key="s.scriptId"
+                        >
+                          <el-input-number
+                            :model-value="scriptRpsInStep(step, s.scriptId)"
+                            :min="1"
+                            :max="100000"
+                            :step="100"
+                            controls-position="right"
+                            class="rps-matrix-table__input"
+                            @change="(val: number | undefined) => setScriptRpsInStep(i, s.scriptId, val ?? 1)"
+                          />
+                        </td>
+                        <td class="rps-matrix-table__total-col">
+                          <strong>{{ stepTotalRps(step) }}</strong>
+                        </td>
+                        <td>
+                          <el-input-number
+                            v-model="step.rampTime"
+                            :min="0"
+                            :max="step.duration"
+                            :placeholder="i === 0 ? '从 0' : '秒'"
+                            controls-position="right"
+                            class="rps-matrix-table__input rps-matrix-table__input--sm"
+                          />
+                        </td>
+                        <td>
+                          <el-input-number
+                            v-model="step.duration"
+                            :min="10"
+                            placeholder="秒"
+                            controls-position="right"
+                            class="rps-matrix-table__input rps-matrix-table__input--sm"
+                          />
+                        </td>
+                        <td class="rps-matrix-table__op-col">
+                          <el-button
+                            size="small"
+                            type="danger"
+                            plain
+                            :icon="Delete"
+                            :disabled="form.scenarioConfig.rpsSteps.length <= 1"
+                            @click="removeRpsStep(i)"
+                          />
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
+                <el-button size="small" :icon="Plus" :disabled="form.scripts.length === 0" style="margin-top: 12px" @click="addRpsStep">添加阶段</el-button>
               </el-form-item>
 
-              <!-- 并发 / RPS 曲线预览 -->
               <div class="curve-preview">
-                <div class="curve-preview__title">{{ form.scenarioConfig.mode === 'rps' ? 'RPS 曲线预览' : '并发曲线预览' }}</div>
+                <div class="curve-preview__title">RPS 曲线预览（全场合计）</div>
                 <BaseChart :option="curveOption" width="100%" height="180px" />
               </div>
             </template>
@@ -510,6 +533,8 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import type { StressTask, ScenarioConfig, ExecutionRecord, RpsStepConfig } from '@/types'
+import { can } from '@/utils/permissions'
+import { useAuthStore } from '@/stores/auth'
 import { formatTime, formatDuration } from '@/utils/format'
 import { isActiveExecution, executionMonitorPath } from '@/utils/execution'
 import request from '@/utils/request'
@@ -520,6 +545,9 @@ const taskStore = useTaskStore()
 const scriptStore = useScriptStore()
 const executionStore = useExecutionStore()
 const projectStore = useProjectStore()
+const authStore = useAuthStore()
+const canEdit = computed(() => can(authStore.userInfo?.role, 'edit'))
+const canRun = computed(() => can(authStore.userInfo?.role, 'run'))
 
 const taskId = computed(() => route.params.id as string)
 const isCreate = computed(() => !taskId.value || route.path === '/task/create')
@@ -594,8 +622,52 @@ const filteredScripts = computed(() => {
   )
 })
 
-function scriptTargetRps(s: { targetRps?: number; weight: number }) {
-  return s.targetRps && s.targetRps > 0 ? s.targetRps : s.weight
+function stepTotalRps(step: { rps?: number; scriptTargets?: { scriptId: string; rps: number }[] }) {
+  const targets = step.scriptTargets || []
+  if (targets.length === 0) return step.rps || 0
+  return targets.reduce((sum, t) => sum + (t.rps || 0), 0)
+}
+
+function scriptRpsInStep(step: { scriptTargets?: { scriptId: string; rps: number }[] }, scriptId: string) {
+  return step.scriptTargets?.find(t => t.scriptId === scriptId)?.rps ?? 1
+}
+
+function setScriptRpsInStep(stepIndex: number, scriptId: string, rps: number) {
+  const step = form.scenarioConfig.rpsSteps?.[stepIndex]
+  if (!step) return
+  if (!step.scriptTargets) step.scriptTargets = []
+  const idx = step.scriptTargets.findIndex(t => t.scriptId === scriptId)
+  if (idx >= 0) step.scriptTargets[idx].rps = Math.max(1, rps)
+  else step.scriptTargets.push({ scriptId, rps: Math.max(1, rps) })
+  step.rps = stepTotalRps(step)
+}
+
+function scriptPeakFromMatrix(scriptId: string) {
+  let max = 0
+  for (const step of form.scenarioConfig.rpsSteps || []) {
+    const v = scriptRpsInStep(step, scriptId)
+    if (v > max) max = v
+  }
+  return max
+}
+
+/** 保证每个阶段的 scriptTargets 覆盖当前已绑定脚本 */
+function syncMatrixColumns() {
+  const scripts = form.scripts || []
+  const steps = form.scenarioConfig.rpsSteps || []
+  for (const step of steps) {
+    if (!step.scriptTargets) step.scriptTargets = []
+    const keep = new Set(scripts.map((s: { scriptId: string }) => s.scriptId))
+    step.scriptTargets = step.scriptTargets.filter(t => keep.has(t.scriptId))
+    for (const s of scripts) {
+      if (!step.scriptTargets.some(t => t.scriptId === s.scriptId)) {
+        const prev = steps.find(st => st !== step && st.scriptTargets?.some(t => t.scriptId === s.scriptId))
+        const fallback = prev ? scriptRpsInStep(prev, s.scriptId) : 100
+        step.scriptTargets.push({ scriptId: s.scriptId, rps: fallback })
+      }
+    }
+    step.rps = stepTotalRps(step)
+  }
 }
 
 const form = reactive({
@@ -614,9 +686,9 @@ const form = reactive({
       { concurrent: 200, duration: 100, rampTime: 30 },
     ],
     rpsSteps: [
-      { rps: 100, duration: 60, rampTime: 0 },
-      { rps: 300, duration: 60, rampTime: 30 },
-      { rps: 500, duration: 120, rampTime: 30 },
+      { rps: 0, duration: 60, rampTime: 0, scriptTargets: [] as { scriptId: string; rps: number }[] },
+      { rps: 0, duration: 60, rampTime: 30, scriptTargets: [] as { scriptId: string; rps: number }[] },
+      { rps: 0, duration: 120, rampTime: 30, scriptTargets: [] as { scriptId: string; rps: number }[] },
     ],
     circuitBreaker: {
       enabled: false,
@@ -632,29 +704,18 @@ const form = reactive({
 
 const isRpsMode = computed(() => form.scenarioConfig.mode === 'rps')
 
-const totalScriptTargetRps = computed(() =>
-  form.scripts.reduce((sum, s) => sum + scriptTargetRps(s), 0),
-)
-
-/** 将场景阶梯末阶段 RPS 对齐为各脚本 targetRps 之和（峰值唯一来源） */
-function syncScenePeakRps() {
-  if (!isRpsMode.value) return
-  const steps = form.scenarioConfig.rpsSteps
-  if (!steps?.length) return
-  const peak = totalScriptTargetRps.value
-  if (peak <= 0) return
-
-  const oldPeak = steps[steps.length - 1].rps
-  if (oldPeak > 0 && oldPeak !== peak) {
-    const ratio = peak / oldPeak
-    for (let i = 0; i < steps.length - 1; i++) {
-      steps[i].rps = Math.max(1, Math.round(steps[i].rps * ratio))
-    }
+const peakMatrixRps = computed(() => {
+  let max = 0
+  for (const step of form.scenarioConfig.rpsSteps || []) {
+    const t = stepTotalRps(step)
+    if (t > max) max = t
   }
-  steps[steps.length - 1].rps = peak
-}
+  return max
+})
 
-watch(totalScriptTargetRps, () => syncScenePeakRps())
+watch(() => form.scripts.map((s: { scriptId: string }) => s.scriptId).join(','), () => {
+  if (isRpsMode.value) syncMatrixColumns()
+})
 
 const curveOption = computed(() => {
   const points: { x: number; y: number }[] = []
@@ -665,12 +726,10 @@ const curveOption = computed(() => {
     ;(cfg.vuSteps || []).forEach(step => {
       const ramp = step.rampTime ?? 0
       if (ramp > 0) {
-        // 爬坡段：斜线
         points.push({ x: t, y: prevC })
         points.push({ x: t + ramp, y: step.concurrent })
         t += ramp
       } else {
-        // 瞬变：阶跃
         points.push({ x: t, y: prevC })
         points.push({ x: t, y: step.concurrent })
       }
@@ -682,17 +741,18 @@ const curveOption = computed(() => {
     let t = 0
     let prevR = 0
     ;(cfg.rpsSteps || []).forEach(step => {
+      const total = stepTotalRps(step)
       if (step.rampTime > 0) {
         points.push({ x: t, y: prevR })
-        points.push({ x: t + step.rampTime, y: step.rps })
+        points.push({ x: t + step.rampTime, y: total })
         t += step.rampTime
       } else {
         points.push({ x: t, y: prevR })
-        points.push({ x: t, y: step.rps })
+        points.push({ x: t, y: total })
       }
       t += step.duration
-      points.push({ x: t, y: step.rps })
-      prevR = step.rps
+      points.push({ x: t, y: total })
+      prevR = total
     })
     const rampDown = cfg.rpsRampDownTime ?? 0
     if (rampDown > 0 && prevR > 0) {
@@ -750,7 +810,7 @@ onMounted(async () => {
     syncSceneEnvRowsFromConfig(form.scenarioConfig.envVars)
     normalizeRpsScene(form.scenarioConfig)
     form.scripts = [...task.value.scripts]
-    syncScenePeakRps()
+    syncMatrixColumns()
   }
   await scriptStore.fetchList({ pageSize: 100 })
   await refreshActiveExecution()
@@ -786,11 +846,17 @@ function removeStep(i: number) {
 function addRpsStep() {
   form.scenarioConfig.rpsSteps = form.scenarioConfig.rpsSteps || []
   const steps = form.scenarioConfig.rpsSteps
-  const peak = totalScriptTargetRps.value
-  const prev = steps.at(-1)?.rps ?? 0
-  const guess = peak > prev ? Math.min(peak, prev + 200) : prev + 200
-  steps.push({ rps: Math.max(1, guess), duration: 60, rampTime: 30 })
-  syncScenePeakRps()
+  const prev = steps.at(-1)
+  const targets = (form.scripts || []).map((s: { scriptId: string }) => ({
+    scriptId: s.scriptId,
+    rps: prev ? scriptRpsInStep(prev, s.scriptId) : 100,
+  }))
+  steps.push({
+    rps: targets.reduce((sum: number, t: { rps: number }) => sum + t.rps, 0),
+    duration: 60,
+    rampTime: 30,
+    scriptTargets: targets,
+  })
 }
 
 function removeRpsStep(i: number) {
@@ -800,30 +866,17 @@ function removeRpsStep(i: number) {
     const ok = await confirmDanger('确认删除该 RPS 阶梯？', { title: '删除确认' })
     if (!ok) return
     steps.splice(i, 1)
-    syncScenePeakRps()
   })()
 }
 
 async function selectScript(script: any) {
   if (!task.value) return
-  const defaultRps = isRpsMode.value ? 1000 : 100
-  await taskStore.bindScript(task.value.id, script.id, defaultRps, isRpsMode.value ? defaultRps : undefined)
+  const defaultWeight = isRpsMode.value ? 100 : 100
+  await taskStore.bindScript(task.value.id, script.id, defaultWeight)
   form.scripts = [...(taskStore.currentTask?.scripts || [])]
-  syncScenePeakRps()
+  syncMatrixColumns()
   showScriptSelector.value = false
   notifySuccess(`已绑定脚本 ${script.name}`)
-}
-
-async function onTargetRpsChange(scriptId: string, targetRps: number) {
-  if (!task.value || targetRps <= 0) return
-  try {
-    await taskStore.updateScriptTargetRps(task.value.id, scriptId, targetRps)
-    form.scripts = [...(taskStore.currentTask?.scripts || [])]
-    syncScenePeakRps()
-    notifySuccess('脚本目标 RPS 已保存')
-  } catch (e) {
-    notifyError(getErrorMessage(e), '保存失败')
-  }
 }
 
 async function onWeightChange(scriptId: string, weight: number) {
@@ -848,7 +901,7 @@ async function unbindScript(scriptId: string) {
   try {
     await taskStore.unbindScript(task.value.id, scriptId)
     form.scripts = [...(taskStore.currentTask?.scripts || [])]
-    syncScenePeakRps()
+    syncMatrixColumns()
     if (expandedEnvScript.value === scriptId) expandedEnvScript.value = null
     notifySuccess('脚本已解绑')
   } catch (e) {
@@ -928,20 +981,16 @@ async function saveEnvVars(scriptId: string) {
 function normalizeRpsScene(sc: ScenarioConfig) {
   if (sc.mode !== 'rps') return
   sc.rpsMode = 'step'
-  // 兼容旧任务：固定速率 → 单阶段阶梯
-  if ((!sc.rpsSteps || sc.rpsSteps.length === 0) && (sc.targetRps || sc.duration)) {
-    sc.rpsSteps = [{
-      rps: sc.targetRps || 500,
-      duration: sc.duration || 300,
-      rampTime: sc.rpsRampTime ?? 0,
-    }]
-  }
   if (!sc.rpsSteps?.length) {
     sc.rpsSteps = [
-      { rps: 100, duration: 60, rampTime: 0 },
-      { rps: 300, duration: 60, rampTime: 30 },
-      { rps: 500, duration: 120, rampTime: 30 },
+      { rps: 0, duration: 60, rampTime: 0, scriptTargets: [] },
+      { rps: 0, duration: 60, rampTime: 30, scriptTargets: [] },
+      { rps: 0, duration: 120, rampTime: 30, scriptTargets: [] },
     ]
+  }
+  for (const step of sc.rpsSteps) {
+    if (!step.scriptTargets) step.scriptTargets = []
+    step.rps = stepTotalRps(step)
   }
 }
 
@@ -959,7 +1008,19 @@ async function handleSave() {
     form.scenarioConfig.envVars = buildSceneEnvVars()
     if (isRpsMode.value) {
       form.scenarioConfig.rpsMode = 'step'
-      syncScenePeakRps()
+      syncMatrixColumns()
+      if (form.scripts.length === 0) {
+        notifyWarning('RPS 模式请先绑定脚本并配置阶梯矩阵')
+        return
+      }
+      for (const [i, step] of (form.scenarioConfig.rpsSteps || []).entries()) {
+        if (!step.scriptTargets?.length || stepTotalRps(step) <= 0) {
+          notifyWarning(`请完善阶段 ${i + 1} 的脚本 RPS 矩阵`)
+          return
+        }
+        step.rps = stepTotalRps(step)
+      }
+      form.scenarioConfig.targetRps = peakMatrixRps.value
       form.scenarioConfig.duration = rpsStepsTotalDuration(form.scenarioConfig.rpsSteps)
     }
     if (isCreate.value) {
@@ -1310,6 +1371,85 @@ function goReport(reportId: string) {
     flex: 1;
     min-width: 200px;
     font-size: 12px;
+  }
+}
+
+.rps-matrix-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid $border-color-light;
+  border-radius: $border-radius-sm;
+}
+
+.rps-matrix-table {
+  border-collapse: collapse;
+  width: 100%;
+
+  th,
+  td {
+    padding: 8px 10px;
+    text-align: center;
+    white-space: nowrap;
+    border-bottom: 1px solid $border-color-light;
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    background: $bg-page;
+    font-size: 12px;
+    font-weight: 600;
+    color: $text-secondary;
+    z-index: 1;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  tbody tr:hover td {
+    background: rgba($color-primary, 0.03);
+  }
+
+  &__stage-col {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: $bg-page;
+    font-size: 13px;
+    font-weight: 500;
+    color: $text-secondary;
+    text-align: left;
+  }
+
+  thead .rps-matrix-table__stage-col {
+    z-index: 3;
+  }
+
+  &__script-col {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__total-col {
+    strong {
+      font-size: 16px;
+      color: $text-primary;
+      font-variant-numeric: tabular-nums;
+    }
+  }
+
+  &__op-col {
+    width: 48px;
+  }
+
+  &__input {
+    width: 140px;
+
+    &--sm {
+      width: 110px;
+    }
   }
 }
 

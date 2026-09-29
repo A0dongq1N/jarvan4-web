@@ -6,7 +6,6 @@ import request from '@/utils/request'
 export const useScriptStore = defineStore('script', () => {
   const list = ref<Script[]>([])
   const total = ref(0)
-  const currentScript = ref<Script | null>(null)
   const versionHistory = ref<ScriptVersion[]>([])
   const versionTotal = ref(0)
   const loading = ref(false)
@@ -20,12 +19,6 @@ export const useScriptStore = defineStore('script', () => {
     } finally {
       loading.value = false
     }
-  }
-
-  async function fetchById(id: string) {
-    const res = await request.get(`/scripts/${id}`)
-    currentScript.value = res.data.data
-    return res.data.data as Script
   }
 
   async function deleteScript(id: string) {
@@ -42,7 +35,7 @@ export const useScriptStore = defineStore('script', () => {
   }
 
   return {
-    list, total, currentScript, versionHistory, versionTotal, loading,
-    fetchList, fetchById, deleteScript, fetchVersionHistory,
+    list, total, versionHistory, versionTotal, loading,
+    fetchList, deleteScript, fetchVersionHistory,
   }
 })
