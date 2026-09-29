@@ -40,7 +40,7 @@
           {{ startStressLabel }}
         </el-button>
         <el-button
-          v-if="executionStatus === 'pending'"
+          v-if="executionStatus === 'pending' && canRun"
           type="primary"
           :icon="VideoPlay"
           size="large"
@@ -61,7 +61,7 @@
           正在部署脚本...
         </el-button>
         <el-button
-          v-if="executionStatus === 'prepared' && hasDeployedScripts"
+          v-if="executionStatus === 'prepared' && hasDeployedScripts && canRun"
           type="primary"
           :icon="VideoPlay"
           size="large"
@@ -72,7 +72,7 @@
           开始注入流量
         </el-button>
         <el-button
-          v-if="canStop"
+          v-if="canStop && canRun"
           type="danger"
           :icon="VideoPause"
           size="large"
@@ -233,7 +233,7 @@
       <div class="prepared-panel__text">
         <div class="prepared-panel__title">脚本部署完成，可开始注入流量</div>
         <div class="prepared-panel__hint">
-          已选定 {{ executionStore.state?.workerSnapshots?.length || 0 }} 个 Worker 节点并加载脚本插件，确认后才会开始发压。
+          已选定 {{ executionStore.state?.workerSnapshots?.length || 0 }} 个 Worker 节点并校验脚本可执行，确认后才会开始发压。
           超过 15 分钟未开始注入流量将自动取消并释放 Worker。
         </div>
         <div v-if="executionStore.state?.workerSnapshots?.length" class="prepared-panel__workers">
@@ -246,7 +246,7 @@
           <div class="scene-plan__title">本次压测计划</div>
           <div class="scene-plan__summary">{{ scenePlanSummary }}</div>
           <div v-if="scenePlan.scripts?.length && scenePlan.mode === 'rps'" class="scene-plan__section">
-            <span class="scene-plan__label">脚本目标 RPS</span>
+            <span class="scene-plan__label">脚本峰值 RPS</span>
             <div class="scene-plan__tags">
               <span v-for="s in scenePlan.scripts" :key="s.scriptName" class="scene-plan__tag">
                 {{ s.scriptName }} · {{ s.targetRps }} RPS
@@ -418,11 +418,15 @@ import ExecutionLogPanel from '@/components/execution/ExecutionLogPanel.vue'
 import StressReportResults from '@/components/report/StressReportResults.vue'
 import { formatDuration } from '@/utils/format'
 import { formatDeployError } from '@/utils/execution'
+import { can } from '@/utils/permissions'
+import { useAuthStore } from '@/stores/auth'
 import request from '@/utils/request'
 import type { TaskStatus, ScriptStatus, WorkerSnapshot, ExecutionState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
+const canRun = computed(() => can(authStore.userInfo?.role, 'run'))
 const executionStore = useExecutionStore()
 const { logs, droppedLogs, logWorkerFilter } = storeToRefs(executionStore)
 const taskStore = useTaskStore()
@@ -513,7 +517,7 @@ const deployPhaseTitle = computed(() =>
 const deployPhaseSubtitle = computed(() => {
   if (isCapacityDeployFailure.value) return '校验集群容量与节点资源，通过后再分发脚本'
   if (executionStatus.value === 'pending') return '勾选本次要部署的脚本，确认后再下发到 Worker'
-  return '将脚本插件分发到 Worker 节点并完成加载'
+  return '将脚本二进制分发到 Worker 节点并完成校验'
 })
 
 const candidateScripts = computed(() => executionStore.state?.scriptSnapshots ?? [])

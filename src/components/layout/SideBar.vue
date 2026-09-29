@@ -46,20 +46,29 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { DataAnalysis, Document, TrendCharts, Cpu, Expand, Fold, Tickets } from '@element-plus/icons-vue'
+import { DataAnalysis, Document, TrendCharts, Cpu, Expand, Fold, Tickets, User } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
+import { can } from '@/utils/permissions'
 
 defineProps<{ collapsed: boolean }>()
 defineEmits<{ toggle: [] }>()
 
 const route = useRoute()
+const authStore = useAuthStore()
 
-const navItems = [
-  { path: '/task',   label: '压测任务', icon: DataAnalysis },
-  { path: '/script', label: '脚本管理', icon: Document },
-  { path: '/report', label: '压测报告', icon: TrendCharts },
-  { path: '/worker', label: '节点管理', icon: Cpu },
-  { path: '/audit',  label: '审计日志', icon: Tickets },
-]
+const navItems = computed(() => {
+  const items = [
+    { path: '/task', label: '压测任务', icon: DataAnalysis },
+    { path: '/script', label: '脚本管理', icon: Document },
+    { path: '/report', label: '压测报告', icon: TrendCharts },
+    { path: '/worker', label: '节点管理', icon: Cpu },
+  ]
+  if (can(authStore.userInfo?.role, 'users')) {
+    items.push({ path: '/users', label: '用户管理', icon: User })
+    items.push({ path: '/audit', label: '审计日志', icon: Tickets })
+  }
+  return items
+})
 
 const activeMenu = computed(() => {
   const path = route.path
@@ -68,6 +77,8 @@ const activeMenu = computed(() => {
   if (path.startsWith('/report')) return '/report'
   if (path.startsWith('/worker')) return '/worker'
   if (path.startsWith('/audit')) return '/audit'
+  if (path.startsWith('/users')) return '/users'
+  if (path.startsWith('/account')) return '/account'
   return '/task'
 })
 </script>
