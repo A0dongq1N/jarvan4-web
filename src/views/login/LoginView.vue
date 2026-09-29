@@ -139,7 +139,7 @@
 
         <div class="login-form__hint">
           <el-text v-if="activeTab === 'password'" type="info" size="small">
-            测试账号：admin / admin123
+            未注册的用户名会自动开户。预置账号：admin / admin123，viewer / 任意密码（观察员清单）
           </el-text>
           <el-text v-else type="info" size="small">
             测试验证码：123456（任意手机号）
@@ -174,7 +174,7 @@ const loading = ref(false)
 
 // ── 账号密码登录 ──────────────────────────────────────────────────
 const passwordFormRef = ref<FormInstance>()
-const passwordForm = reactive({ username: 'admin', password: 'admin123' })
+const passwordForm = reactive({ username: '', password: '' })
 
 const passwordRules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -187,12 +187,28 @@ async function handlePasswordLogin() {
   if (!valid) return
   loading.value = true
   try {
-    const res = await request.post('/auth/login', passwordForm)
+    const keyRes = await request.get('/auth/login-key')
+    if (keyRes.data.code !== 0 || !keyRes.data.data) {
+      throw new Error(keyRes.data.message || '获取登录密钥失败')
+    }
+    const { keyId, publicKeyPem, nonce } = keyRes.data.data
+    const { encryptLoginPassword } = await import('@/utils/loginCrypto')
+    const encrypted = await encryptLoginPassword(publicKeyPem, nonce, passwordForm.password)
+    const res = await request.post('/auth/login', {
+      username: passwordForm.username,
+      password: encrypted,
+      keyId,
+    })
     if (res.data.code !== 0) throw new Error(res.data.message)
-    const { token, userInfo } = res.data.data
+    const { token, userInfo, registered } = res.data.data
     authStore.login(token, userInfo)
-    ElMessage.success('登录成功')
-    await router.push('/project')
+    if (registered) {
+      ElMessage.success('首次登录，已为你创建账号')
+      await router.push('/account')
+    } else {
+      ElMessage.success('登录成功')
+      await router.push('/project')
+    }
   } catch (e: any) {
     ElMessage.error(e?.message || e?.response?.data?.message || '登录失败')
   } finally {
