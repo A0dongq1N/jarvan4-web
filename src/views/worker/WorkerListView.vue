@@ -1,7 +1,7 @@
 <template>
   <div class="worker-list-view">
     <PageHeader title="节点管理">
-      <el-button :icon="Refresh" @click="load" :loading="loading">刷新</el-button>
+      <el-button :icon="Refresh" @click="refresh" :loading="loading">刷新</el-button>
     </PageHeader>
 
     <!-- 统计卡片 -->
@@ -45,13 +45,22 @@
           <span class="scheduling-settings__label">单 Worker 上限</span>
           <el-input-number v-model="maxRpsPerWorker" :min="100" :max="100000" :step="100" />
         </div>
-        <el-button type="primary" :loading="savingScheduling" @click="saveScheduling">保存</el-button>
+        <el-button v-if="canScheduling" type="primary" :loading="savingScheduling" @click="saveScheduling">保存</el-button>
       </div>
     </div>
 
     <!-- 筛选栏 -->
     <div class="worker-toolbar">
-      <el-radio-group v-model="statusFilter" @change="load">
+      <el-input
+        v-model="keyword"
+        placeholder="搜索主机名或 IP"
+        :prefix-icon="Search"
+        clearable
+        style="width: 240px"
+        @input="handleKeywordInput"
+        @clear="handleKeywordInput"
+      />
+      <el-radio-group v-model="statusFilter" @change="handleStatusChange">
         <el-radio-button value="">全部</el-radio-button>
         <el-radio-button value="busy">执行中</el-radio-button>
         <el-radio-button value="online">空闲</el-radio-button>
@@ -60,104 +69,123 @@
     </div>
 
     <!-- 节点列表 -->
-    <div class="worker-grid">
-      <div
-        v-for="w in workers"
-        :key="w.id"
-        class="worker-card"
-        :class="`worker-card--${w.status}`"
+    <div class="table-card">
+      <el-table
+        :data="workers"
+        row-key="id"
+        class="worker-table"
+        :row-class-name="rowClassName"
       >
-        <!-- 卡片头部 -->
-        <div class="worker-card__header">
-          <div class="worker-card__title">
-            <span class="worker-card__hostname">{{ w.hostname }}</span>
+        <el-table-column label="主机名" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="cell-mono">{{ row.hostname }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="地址" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="cell-mono cell-muted">{{ row.ip }}:{{ row.port }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="108">
+          <template #default="{ row }">
             <el-tag
               size="small"
-              :type="statusType(w.status)"
+              :type="statusType(row.status)"
               effect="light"
-              class="worker-card__status-tag"
+              class="status-tag"
             >
-              <span class="worker-card__status-dot" :class="`dot--${w.status}`" />
-              {{ statusLabel(w.status) }}
+              <span class="status-dot" :class="`dot--${row.status}`" />
+              {{ statusLabel(row.status) }}
             </el-tag>
-          </div>
-          <el-dropdown v-if="w.status !== 'offline'" trigger="click" @command="handleCommand($event, w)">
-            <el-button :icon="MoreFilled" size="small" text />
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="offline" style="color: #e0226e">下线节点</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="正在执行的任务" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="runningTaskLabel(row)" class="task-name">{{ runningTaskLabel(row) }}</span>
+            <span v-else class="cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="CPU 使用率" min-width="150">
+          <template #default="{ row }">
+            <div class="usage-cell">
+              <span class="usage-cell__value">{{ row.cpuUsage.toFixed(1) }}%</span>
+              <el-progress
+                :percentage="clampPct(row.cpuUsage)"
+                :stroke-width="6"
+                :color="cpuColor(row.cpuUsage)"
+                :show-text="false"
+              />
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="内存使用率" min-width="150">
+          <template #default="{ row }">
+            <div class="usage-cell">
+              <span class="usage-cell__value">{{ row.memUsage.toFixed(1) }}%</span>
+              <el-progress
+                :percentage="clampPct(row.memUsage)"
+                :stroke-width="6"
+                :color="cpuColor(row.memUsage)"
+                :show-text="false"
+              />
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="并发" width="110" align="right">
+          <template #default="{ row }">
+            <span class="cell-num">{{ row.currentConcurrency }} / {{ row.maxConcurrency }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="调度 RPS 配额" min-width="140">
+          <template #default="{ row }">
+            <div class="quota-cell">
+              <span class="cell-num">{{ row.effectiveMaxRps ?? '—' }}</span>
+              <span
+                v-if="row.declaredMaxRps != null && row.declaredMaxRps !== row.effectiveMaxRps"
+                class="cell-sub"
+              >自报 {{ row.declaredMaxRps }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="规格" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="spec-cell">
+              <span>{{ row.cpuCores }} 核 / {{ row.memTotalGb }} GB</span>
+              <span v-if="row.workerBuildId" class="cell-sub">build {{ row.workerBuildId }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="心跳" width="100">
+          <template #default="{ row }">
+            <span class="cell-muted">{{ formatHeartbeatAgo(heartbeatDisplaySec(row)) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right" align="center">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.status !== 'offline' && canOffline"
+              size="small"
+              type="danger"
+              plain
+              @click="offlineWorker(row)"
+            >下线</el-button>
+            <span v-else class="cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <EmptyState v-if="!loading" title="暂无节点" desc="没有符合条件的 Worker 节点" />
+        </template>
+      </el-table>
 
-        <!-- 地址 -->
-        <div class="worker-card__addr">
-          <el-icon><Monitor /></el-icon>
-          <span>{{ w.ip }}:{{ w.port }}</span>
-        </div>
-
-        <!-- 正在执行的任务 -->
-        <div v-if="w.runningTaskName" class="worker-card__task">
-          <el-icon><VideoPlay /></el-icon>
-          <span>{{ w.runningTaskName }}</span>
-        </div>
-
-        <!-- 指标行 -->
-        <div class="worker-card__metrics">
-          <div class="metric">
-            <div class="metric__label">CPU 使用率</div>
-            <el-progress
-              :percentage="w.cpuUsage"
-              :stroke-width="6"
-              :color="cpuColor(w.cpuUsage)"
-              :show-text="false"
-              style="flex: 1"
-            />
-            <span class="metric__value">{{ w.cpuUsage.toFixed(1) }}%</span>
-          </div>
-          <div class="metric">
-            <div class="metric__label">内存使用率</div>
-            <el-progress
-              :percentage="w.memUsage"
-              :stroke-width="6"
-              :color="cpuColor(w.memUsage)"
-              :show-text="false"
-              style="flex: 1"
-            />
-            <span class="metric__value">{{ w.memUsage.toFixed(1) }}%</span>
-          </div>
-          <div class="metric">
-            <div class="metric__label">并发占用</div>
-            <el-progress
-              :percentage="concurrencyPct(w)"
-              :stroke-width="6"
-              color="#3871dc"
-              :show-text="false"
-              style="flex: 1"
-            />
-            <span class="metric__value">{{ w.currentConcurrency }} / {{ w.maxConcurrency }}</span>
-          </div>
-          <div class="metric">
-            <div class="metric__label">调度 RPS 配额</div>
-            <span class="metric__value metric__value--quota">
-              {{ w.effectiveMaxRps ?? '—' }}
-              <span v-if="w.declaredMaxRps && w.declaredMaxRps !== w.effectiveMaxRps" class="metric__sub">
-                / 自报 {{ w.declaredMaxRps }}
-              </span>
-            </span>
-          </div>
-        </div>
-
-        <!-- 底部：CPU 核数 + 心跳时间 -->
-        <div class="worker-card__footer">
-          <span>{{ w.cpuCores }} 核 / {{ w.memTotalGb }} GB</span>
-          <span v-if="w.pluginAbiVersion">ABI v{{ w.pluginAbiVersion }}<template v-if="w.workerBuildId"> · {{ w.workerBuildId }}</template></span>
-          <span>心跳 {{ formatHeartbeatAgo(heartbeatDisplaySec(w)) }}</span>
-        </div>
+      <div class="worker-pagination">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="total"
+          layout="total, prev, pager, next"
+          @change="onPageChange"
+        />
       </div>
-
-      <EmptyState v-if="!loading && workers.length === 0" title="暂无节点" desc="没有符合条件的 Worker 节点" />
     </div>
   </div>
 </template>
@@ -166,23 +194,42 @@
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { notifyError, notifySuccess, getErrorMessage } from '@/utils/feedback'
 import { confirmDanger } from '@/utils/confirm'
-import { Refresh, MoreFilled, Monitor, VideoPlay } from '@element-plus/icons-vue'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { formatHeartbeatAgo } from '@/utils/format'
-import type { WorkerNode, WorkerStatus } from '@/types'
+import { can } from '@/utils/permissions'
+import { useAuthStore } from '@/stores/auth'
+import type { WorkerListData, WorkerNode, WorkerStatus } from '@/types'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
 const workers = ref<WorkerNode[]>([])
+const authStore = useAuthStore()
+const canScheduling = computed(() => can(authStore.userInfo?.role, 'scheduling'))
+const canOffline = computed(() => can(authStore.userInfo?.role, 'offline'))
 const loading = ref(false)
 const maxRpsPerWorker = ref(2000)
 const rpsPerCore = ref(300)
 const savingScheduling = ref(false)
 const statusFilter = ref('')
+const keyword = ref('')
+const queryKeyword = ref('')
+const currentPage = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const stats = ref({
+  total: 0,
+  busy: 0,
+  online: 0,
+  offline: 0,
+  usedConcurrency: 0,
+  totalConcurrency: 0,
+})
 const workersFetchedAt = ref(0)
 const nowTick = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | null = null
 let tickTimer: ReturnType<typeof setInterval> | null = null
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 // 心跳间隔内维持最近一次非零 CPU/内存，避免轮询间隙展示为 0
 const metricCache = new Map<string, { cpuUsage: number; memUsage: number }>()
@@ -215,29 +262,84 @@ function applyStickyMetrics(list: WorkerNode[]): WorkerNode[] {
   })
 }
 
-const stats = computed(() => {
-  const all = workers.value
-  const total = all.length
-  const busy = all.filter(w => w.status === 'busy').length
-  const online = all.filter(w => w.status === 'online').length
-  const offline = all.filter(w => w.status === 'offline').length
-  const usedConcurrency = all.reduce((s, w) => s + w.currentConcurrency, 0)
-  const totalConcurrency = all.filter(w => w.status !== 'offline').reduce((s, w) => s + w.maxConcurrency, 0)
-  return { total, busy, online, offline, usedConcurrency, totalConcurrency }
-})
+function commitKeyword() {
+  queryKeyword.value = keyword.value.trim()
+}
 
-async function load() {
-  loading.value = true
+function clearSearchTimer() {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+}
+
+async function load(opts?: { silent?: boolean }) {
+  const silent = opts?.silent === true
+  if (!silent) loading.value = true
   try {
-    const params: Record<string, string> = { pageSize: '100' }
+    const params: Record<string, string | number> = {
+      page: currentPage.value,
+      pageSize: pageSize.value,
+    }
     if (statusFilter.value) params.status = statusFilter.value
+    if (queryKeyword.value) params.keyword = queryKeyword.value
     const res = await request.get('/workers', { params })
-    workers.value = applyStickyMetrics(res.data.data.list)
+    const data = res.data.data as WorkerListData
+    workers.value = applyStickyMetrics(data.list ?? [])
+    total.value = data.total ?? 0
+    stats.value = {
+      total: data.total ?? 0,
+      busy: data.busyCount ?? 0,
+      online: data.onlineCount ?? 0,
+      offline: data.offlineCount ?? 0,
+      usedConcurrency: data.usedConcurrency ?? 0,
+      totalConcurrency: data.totalConcurrency ?? 0,
+    }
     workersFetchedAt.value = Date.now()
     nowTick.value = workersFetchedAt.value
+  } catch (e) {
+    if (!silent) throw e
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
+}
+
+function reloadFromFirstPage() {
+  if (currentPage.value !== 1) {
+    currentPage.value = 1
+    return
+  }
+  load()
+}
+
+function handleKeywordInput() {
+  clearSearchTimer()
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    commitKeyword()
+    reloadFromFirstPage()
+  }, 300)
+}
+
+function handleStatusChange() {
+  clearSearchTimer()
+  commitKeyword()
+  reloadFromFirstPage()
+}
+
+function onPageChange() {
+  load()
+}
+
+function refresh() {
+  clearSearchTimer()
+  const next = keyword.value.trim()
+  if (next !== queryKeyword.value) {
+    queryKeyword.value = next
+    reloadFromFirstPage()
+    return
+  }
+  load()
 }
 
 async function loadScheduling() {
@@ -277,15 +379,19 @@ function statusLabel(status: WorkerStatus) {
   return '离线'
 }
 
+function runningTaskLabel(row: WorkerNode) {
+  return row.runningTaskName?.trim() || row.runningRunId?.trim() || ''
+}
+
 function cpuColor(pct: number) {
   if (pct >= 85) return '#e0226e'
   if (pct >= 60) return '#ff9900'
   return '#1b855e'
 }
 
-function concurrencyPct(w: WorkerNode) {
-  if (!w.maxConcurrency) return 0
-  return Math.min(100, Math.round(w.currentConcurrency / w.maxConcurrency * 100))
+function clampPct(n: number) {
+  if (!Number.isFinite(n)) return 0
+  return Math.min(100, Math.max(0, n))
 }
 
 function heartbeatDisplaySec(w: WorkerNode) {
@@ -295,9 +401,15 @@ function heartbeatDisplaySec(w: WorkerNode) {
   return w.heartbeatAgoSec + elapsed
 }
 
+function rowClassName({ row }: { row: WorkerNode }) {
+  return row.status === 'offline' ? 'worker-row--offline' : ''
+}
+
 function startTimers() {
   if (!timer) {
-    timer = setInterval(load, 5000)
+    timer = setInterval(() => {
+      load({ silent: true })
+    }, 5000)
   }
   if (!tickTimer) {
     tickTimer = setInterval(() => {
@@ -315,22 +427,21 @@ function stopTimers() {
     clearInterval(tickTimer)
     tickTimer = null
   }
+  clearSearchTimer()
 }
 
-async function handleCommand(cmd: string, w: WorkerNode) {
-  if (cmd === 'offline') {
-    const ok = await confirmDanger(`确定将节点 ${w.hostname} 下线？`, {
-      title: '下线节点',
-      confirmText: '确定下线',
-    })
-    if (!ok) return
-    try {
-      await request.post(`/workers/${w.workerId}/offline`)
-      notifySuccess(`节点 ${w.hostname} 已下线`)
-      load()
-    } catch (e) {
-      notifyError(getErrorMessage(e), '下线失败')
-    }
+async function offlineWorker(w: WorkerNode) {
+  const ok = await confirmDanger(`确定将节点 ${w.hostname} 下线？`, {
+    title: '下线节点',
+    confirmText: '确定下线',
+  })
+  if (!ok) return
+  try {
+    await request.post(`/workers/${w.workerId}/offline`)
+    notifySuccess(`节点 ${w.hostname} 已下线`)
+    load()
+  } catch (e) {
+    notifyError(getErrorMessage(e), '下线失败')
   }
 }
 
@@ -360,7 +471,7 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .worker-list-view {
-  max-width: 1200px;
+  max-width: 100%;
 }
 
 // ── 统计卡片 ────────────────────────────────────────────────────
@@ -393,13 +504,6 @@ onUnmounted(() => {
     font-size: 12px;
     color: $text-secondary;
     margin-top: 4px;
-  }
-
-  &__control {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
   }
 
   &__controls {
@@ -457,105 +561,84 @@ onUnmounted(() => {
 
 // ── 筛选栏 ──────────────────────────────────────────────────────
 .worker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
-// ── 节点网格 ─────────────────────────────────────────────────────
-.worker-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
-}
-
-.worker-card {
+.table-card {
   background: $bg-card;
   border-radius: $border-radius;
-  padding: 18px 20px;
-  box-shadow: $shadow-sm;
-  border-left: 4px solid $border-color;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  transition: box-shadow 0.15s ease;
+  border: 1px solid $border-color-light;
+  overflow: hidden;
+}
 
-  &:hover { box-shadow: $shadow-md; }
-
-  &--busy    { border-left-color: $color-warning; }
-  &--online  { border-left-color: $color-success; }
-  &--offline { border-left-color: $text-secondary; opacity: 0.65; }
-
-  &__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  &__title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  &__hostname {
+.worker-table {
+  :deep(.el-table__header th) {
+    color: $text-regular;
     font-weight: 600;
-    font-size: 14px;
-    color: $text-primary;
-    font-family: 'SFMono-Regular', Consolas, monospace;
   }
 
-  &__status-tag {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+  :deep(.worker-row--offline) {
+    opacity: 0.65;
   }
 
-  &__addr {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: $text-secondary;
-    font-family: 'SFMono-Regular', Consolas, monospace;
-  }
-
-  &__task {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: $color-warning;
-    background: rgba($color-warning, 0.08);
-    padding: 4px 8px;
-    border-radius: $border-radius-sm;
-  }
-
-  &__metrics {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  &__footer {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: $text-secondary;
-    padding-top: 6px;
-    border-top: 1px solid $border-color-light;
+  :deep(.el-table__empty-block) {
+    min-height: 220px;
   }
 }
 
-.dot--busy    { background: $color-warning; }
-.dot--online  { background: $color-success; }
-.dot--offline { background: $text-secondary; }
+.worker-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 20px;
+  border-top: 1px solid $border-color-light;
+}
 
-.worker-card__status-dot {
+.cell-mono {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 13px;
+  color: $text-primary;
+}
+
+.cell-muted {
+  color: $text-secondary;
+  font-size: 13px;
+}
+
+.cell-num {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: $text-regular;
+}
+
+.cell-sub {
+  font-size: 12px;
+  color: $text-secondary;
+}
+
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+}
+
+.status-dot {
   display: inline-block;
   width: 6px;
   height: 6px;
+  margin-right: 4px;
   border-radius: 50%;
+  vertical-align: middle;
 
-  .dot--busy & { animation: pulse 1.5s infinite; }
+  &.dot--busy {
+    background: $color-warning;
+    animation: pulse 1.5s infinite;
+  }
+
+  &.dot--online { background: $color-success; }
+  &.dot--offline { background: $text-secondary; }
 }
 
 @keyframes pulse {
@@ -563,24 +646,36 @@ onUnmounted(() => {
   50%       { opacity: 0.3; }
 }
 
-.metric {
+.task-name {
+  color: $color-warning;
+  font-size: 13px;
+}
+
+.usage-cell {
   display: flex;
   align-items: center;
   gap: 8px;
 
-  &__label {
-    font-size: 11px;
-    color: $text-secondary;
-    width: 60px;
-    flex-shrink: 0;
+  .el-progress {
+    flex: 1;
+    min-width: 48px;
   }
 
   &__value {
-    font-size: 11px;
-    color: $text-regular;
-    width: 80px;
-    text-align: right;
+    width: 48px;
     flex-shrink: 0;
+    text-align: right;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: $text-regular;
   }
+}
+
+.quota-cell,
+.spec-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
 }
 </style>
