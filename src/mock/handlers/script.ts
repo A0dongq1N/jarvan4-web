@@ -25,15 +25,6 @@ export const scriptHandlers: MockHandler[] = [
       return pageResult(list, total)
     },
   },
-  // 脚本详情
-  {
-    method: 'GET',
-    url: '/scripts/:id',
-    handler: ({ params }) => {
-      const script = scripts.find(s => s.id === params.id)
-      return script ? ok(script) : fail('脚本不存在', 404)
-    },
-  },
   // 下线脚本
   {
     method: 'DELETE',

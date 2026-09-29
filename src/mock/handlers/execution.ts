@@ -48,8 +48,8 @@ const mockExecutionHistory: ExecutionHistoryRecord[] = [
     durationSec: 600,
     reportId: 'report001',
     scriptStatuses: [
-      { scriptId: 'script001', scriptName: 'sdk-refactor-demo', commitHash: 'sdk_refactor', artifactUrl: 'cos://jarvan4/scripts/script001/sdk_refactor.so', status: 'ready' },
-      { scriptId: 'script002', scriptName: 'login-flow', commitHash: 'a1b2c3d4', artifactUrl: 'cos://jarvan4/scripts/script002/a1b2c3d4.so', status: 'ready' },
+      { scriptId: 'script001', scriptName: 'sdk-refactor-demo', commitHash: 'sdk_refactor', artifactUrl: 'cos://jarvan4/scripts/script001/sdk_refactor', status: 'ready' },
+      { scriptId: 'script002', scriptName: 'login-flow', commitHash: 'a1b2c3d4', artifactUrl: 'cos://jarvan4/scripts/script002/a1b2c3d4', status: 'ready' },
     ],
   },
   {
@@ -64,7 +64,7 @@ const mockExecutionHistory: ExecutionHistoryRecord[] = [
     reportId: 'report002',
     errorMsg: '错误率超过阈值，系统过载',
     scriptStatuses: [
-      { scriptId: 'script003', scriptName: 'home-page', commitHash: 'e5f6a7b8', artifactUrl: 'cos://jarvan4/scripts/script003/e5f6a7b8.so', status: 'ready' },
+      { scriptId: 'script003', scriptName: 'home-page', commitHash: 'e5f6a7b8', artifactUrl: 'cos://jarvan4/scripts/script003/e5f6a7b8', status: 'ready' },
     ],
   },
   {
@@ -78,8 +78,8 @@ const mockExecutionHistory: ExecutionHistoryRecord[] = [
     durationSec: 180,
     reportId: 'report003',
     scriptStatuses: [
-      { scriptId: 'script001', scriptName: 'sdk-refactor-demo', commitHash: 'sdk_refactor', artifactUrl: 'cos://jarvan4/scripts/script001/sdk_refactor.so', status: 'ready' },
-      { scriptId: 'script004', scriptName: 'search-stress', commitHash: '9c8d7e6f', artifactUrl: 'cos://jarvan4/scripts/script004/9c8d7e6f.so', status: 'ready' },
+      { scriptId: 'script001', scriptName: 'sdk-refactor-demo', commitHash: 'sdk_refactor', artifactUrl: 'cos://jarvan4/scripts/script001/sdk_refactor', status: 'ready' },
+      { scriptId: 'script004', scriptName: 'search-stress', commitHash: '9c8d7e6f', artifactUrl: 'cos://jarvan4/scripts/script004/9c8d7e6f', status: 'ready' },
     ],
   },
 ]
@@ -329,7 +329,7 @@ export const executionHandlers: MockHandler[] = [
       const initSteps = [
         { key: 'select_worker', label: '选定可用 Worker 节点', status: 'waiting' as const, detail: '' },
         { key: 'download_script', label: '下发脚本产物到 Worker', status: 'waiting' as const, detail: '' },
-        { key: 'load_plugin', label: '加载脚本插件（plugin.Open）', status: 'waiting' as const, detail: '' },
+        { key: 'load_plugin', label: '校验脚本可执行', status: 'waiting' as const, detail: '' },
         { key: 'inject_start', label: '开始注入流量', status: 'waiting' as const, detail: '' },
       ]
 
@@ -403,13 +403,13 @@ export const executionHandlers: MockHandler[] = [
         const r = executions.get(id)
         if (!r || r.execution.status !== 'preparing') return
         r.execution.initSteps![1] = { key: 'download_script', label: '下发脚本产物到 Worker', status: 'done', detail: `${scriptNames.length} 个脚本`, items: scriptNames }
-        r.execution.initSteps![2] = { key: 'load_plugin', label: '加载脚本插件（plugin.Open）', status: 'running', detail: '' }
+        r.execution.initSteps![2] = { key: 'load_plugin', label: '校验脚本可执行', status: 'running', detail: '' }
         r.execution.scriptStatuses!.forEach(s => { s.status = 'ready' })
       }, 1100)
       setTimeout(() => {
         const r = executions.get(id)
         if (!r || r.execution.status !== 'preparing') return
-        r.execution.initSteps![2] = { key: 'load_plugin', label: '加载脚本插件（plugin.Open）', status: 'done', detail: '全部 Worker 加载成功' }
+        r.execution.initSteps![2] = { key: 'load_plugin', label: '校验脚本可执行', status: 'done', detail: '全部 Worker 校验通过' }
         r.execution.status = 'prepared'
       }, 1800)
 
