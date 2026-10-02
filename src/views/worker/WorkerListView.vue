@@ -149,10 +149,7 @@
         </el-table-column>
         <el-table-column label="规格" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            <div class="spec-cell">
-              <span>{{ row.cpuCores }} 核 / {{ row.memTotalGb }} GB</span>
-              <span v-if="row.workerBuildId" class="cell-sub">build {{ row.workerBuildId }}</span>
-            </div>
+            <span>{{ row.cpuCores }} 核 / {{ row.memTotalGb }} GB</span>
           </template>
         </el-table-column>
         <el-table-column label="心跳" width="100">
@@ -671,8 +668,7 @@ onUnmounted(() => {
   }
 }
 
-.quota-cell,
-.spec-cell {
+.quota-cell {
   display: flex;
   flex-direction: column;
   gap: 2px;

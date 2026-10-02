@@ -388,7 +388,6 @@ export interface WorkerNode {
   lastHeartbeat: string
   heartbeatAgoSec: number
   pluginAbiVersion?: number
-  workerBuildId?: string
   declaredMaxRps?: number
   effectiveMaxRps?: number
 }
