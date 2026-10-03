@@ -180,6 +180,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   delete_user: '删除用户',
   register_worker: '注册节点',
   offline_worker: '下线节点',
+  upgrade_worker: '升级节点',
 }
 
 const RESOURCE_TYPE_LABELS: Record<AuditResourceType, string> = {

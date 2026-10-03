@@ -14,34 +14,38 @@ export function formatDeployError(raw: string): DeployErrorView {
     .replace(/\s*\(Worker ABI=\d+ build=\S+，不兼容时请重启 Worker 并用当前平台代码重编脚本\)\s*$/, '')
     .trim()
 
-  const abi = text.match(/ABI[= ](\d+)/)?.[1]
-  const build = text.match(/build[= ]([0-9a-f]+)/i)?.[1]
-  const meta = [abi && `ABI ${abi}`, build && `build ${build}`].filter(Boolean).join(' · ')
-
+  if (/self-check/i.test(text)) {
+    return {
+      title: '脚本二进制自检失败',
+      description: '请重新编译并上传脚本产物，确认目标架构与 Worker 一致。',
+    }
+  }
+  if (/无法执行|permission denied|exec format/i.test(text)) {
+    return {
+      title: '脚本二进制无法执行',
+      description: text,
+    }
+  }
   if (/包版本不一致|different version of package/i.test(text)) {
-    const pkgMatch = text.match(/的\s+(\S+)\s+包版本/)
-    const pkg = pkgMatch?.[1]?.split('/').pop() || 'spec'
+    // 历史 plugin 错误（旧部署记录）
     return {
       title: '脚本与 Worker 版本不一致',
-      description: [
-        `插件与 Worker 的 ${pkg} 包不是同一版本${meta ? `（${meta}）` : ''}。`,
-        '请用当前平台代码重新编译脚本并上传，或重启 Worker 后再部署。',
-      ].join('\n'),
+      description: '请用当前平台代码重新编译脚本并上传（独立二进制方案下一般不再出现此错误）。',
     }
   }
   if (/已在当前 Worker|already loaded|无法重试/i.test(text)) {
     return {
-      title: '插件无法重复加载',
-      description: '请重启 Worker 后再重新部署。',
+      title: '历史插件错误',
+      description: '请重启 Worker 后改用最新脚本二进制重新部署。',
     }
   }
   if (/ABI.*=.*不一致|ABI 不匹配/.test(text)) {
     return {
-      title: '插件 ABI 不匹配',
-      description: '请用当前平台代码重新编译脚本并上传。',
+      title: '历史 ABI 错误',
+      description: '当前已改为独立二进制，请重新编译上传脚本后再部署。',
     }
   }
-  if (text.length <= 80 && !/plugin\.Open|worker rejected/i.test(text)) {
+  if (text.length <= 80 && !/plugin\.Open|worker rejected|self-check/i.test(text)) {
     return { title: text || raw, description: '' }
   }
   return {

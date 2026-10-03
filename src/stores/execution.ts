@@ -65,7 +65,7 @@ export const useExecutionStore = defineStore('execution', () => {
   let metricsTimer: ReturnType<typeof setInterval> | null = null
   let logTimer: ReturnType<typeof setInterval> | null = null
   let initTimer: ReturnType<typeof setInterval> | null = null
-  let preparedTimer: ReturnType<typeof setInterval> | null = null
+  let idleWaitTimer: ReturnType<typeof setInterval> | null = null
 
   function pushPoint(arr: MetricPoint[], point: MetricPoint) {
     arr.push(point)
@@ -87,10 +87,10 @@ export const useExecutionStore = defineStore('execution', () => {
         _startInitPoller(executionState.id)
       } else if (executionState.status === 'pending') {
         _stopInitPoller()
+        _startIdleWaitPoller(executionState.id)
       } else if (executionState.status === 'prepared') {
-        // prepared：等待用户 startRun，轮询以感知后端超时自动取消
         _stopInitPoller()
-        _startPreparedPoller(executionState.id)
+        _startIdleWaitPoller(executionState.id)
       } else if (executionState.status === 'running') {
         startTimers(executionState.id)
       } else {
@@ -127,7 +127,7 @@ export const useExecutionStore = defineStore('execution', () => {
     try {
       const res = await request.post(`/executions/${executionId}/start`)
       state.value = res.data.data
-      _stopPreparedPoller()
+      _stopIdleWaitPoller()
       startTimers(executionId)
       return res.data.data as ExecutionState
     } catch (e) {
@@ -180,9 +180,8 @@ export const useExecutionStore = defineStore('execution', () => {
           _stopInitPoller()
           startTimers(executionId)
         } else if (s.status === 'prepared') {
-          // 部署完成，等用户手动 startRun
           _stopInitPoller()
-          _startPreparedPoller(executionId)
+          _startIdleWaitPoller(executionId)
         } else if (s.status === 'failed' || hasFailedScript) {
           // 部署失败，停止轮询
           _stopInitPoller()
@@ -200,24 +199,25 @@ export const useExecutionStore = defineStore('execution', () => {
     if (initTimer) { clearInterval(initTimer); initTimer = null }
   }
 
-  function _startPreparedPoller(executionId: string) {
-    _stopPreparedPoller()
-    preparedTimer = setInterval(async () => {
+  /** pending / prepared：轮询以感知后端空闲超时自动取消 */
+  function _startIdleWaitPoller(executionId: string) {
+    _stopIdleWaitPoller()
+    idleWaitTimer = setInterval(async () => {
       try {
         const res = await request.get(`/executions/${executionId}`)
         const s: ExecutionState = res.data.data
         state.value = s
-        if (s.status !== 'prepared') {
-          _stopPreparedPoller()
+        if (s.status !== 'pending' && s.status !== 'prepared') {
+          _stopIdleWaitPoller()
         }
       } catch (e) {
-        console.error('[execution] prepared poller error', e)
+        console.error('[execution] idle wait poller error', e)
       }
     }, 5000)
   }
 
-  function _stopPreparedPoller() {
-    if (preparedTimer) { clearInterval(preparedTimer); preparedTimer = null }
+  function _stopIdleWaitPoller() {
+    if (idleWaitTimer) { clearInterval(idleWaitTimer); idleWaitTimer = null }
   }
 
   function applyChartData(chart: {
@@ -435,7 +435,7 @@ export const useExecutionStore = defineStore('execution', () => {
 
   function stopTimers() {
     _stopInitPoller()
-    _stopPreparedPoller()
+    _stopIdleWaitPoller()
     if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null }
     if (logTimer) { clearInterval(logTimer); logTimer = null }
     apiRpsWindows.clear()
@@ -463,11 +463,17 @@ export const useExecutionStore = defineStore('execution', () => {
     summary.value = { rps: 0, avgResponseTime: 0, p99ResponseTime: 0, errorRate: 0, totalRequests: 0, successRequests: 0, failedRequests: 0, concurrent: 0 }
   }
 
-  /** 查询任务当前进行中的执行（部署中 / 待注入 / 注入中） */
-  async function findActiveExecution(taskId: string): Promise<ExecutionRecord | null> {
-    const res = await request.get(`/tasks/${taskId}/executions`, { params: { page: 1, pageSize: 10 } })
+  /** 列出任务下所有进行中的 execution（pending / preparing / prepared / running） */
+  async function listActiveExecutions(taskId: string): Promise<ExecutionRecord[]> {
+    const res = await request.get(`/tasks/${taskId}/executions`, { params: { page: 1, pageSize: 50 } })
     const list = res.data.data.list as ExecutionRecord[]
-    return list.find(r => isActiveExecution(r.status)) ?? null
+    return list.filter((r) => isActiveExecution(r.status))
+  }
+
+  /** 查询任务当前进行中的执行（取最近一条，兼容旧逻辑） */
+  async function findActiveExecution(taskId: string): Promise<ExecutionRecord | null> {
+    const actives = await listActiveExecutions(taskId)
+    return actives[0] ?? null
   }
 
   // 从执行 ID 恢复：刷新页面时重连到已有执行，不清空历史数据
@@ -479,8 +485,8 @@ export const useExecutionStore = defineStore('execution', () => {
       startTimers(executionId)
     } else if (s.status === 'preparing') {
       _startInitPoller(executionId)
-    } else if (s.status === 'prepared') {
-      _startPreparedPoller(executionId)
+    } else if (s.status === 'pending' || s.status === 'prepared') {
+      _startIdleWaitPoller(executionId)
     } else if (s.status === 'success' || s.status === 'stopped' || s.status === 'circuit_broken' || s.status === 'failed') {
       await loadHistoricalCharts(executionId)
       await loadHistoricalLogs(executionId)
@@ -490,7 +496,7 @@ export const useExecutionStore = defineStore('execution', () => {
   return {
     state, summary, rpsData, responseTimeData, errorRateData, concurrentData, logs, droppedLogs, logLevelFilter, logWorkerFilter, loading,
     scenarioMode, targetRps, livePercentiles, liveErrors, liveReport,
-    startExecution, deployScripts, startRun, stopExecution, fetchState, findActiveExecution, resumeExecution, loadHistoricalCharts, loadHistoricalLogs, startTimers, stopTimers, reset, clearCharts, clearLogs, setLogLevelFilter, setLogWorkerFilter
+    startExecution, deployScripts, startRun, stopExecution, fetchState, listActiveExecutions, findActiveExecution, resumeExecution, loadHistoricalCharts, loadHistoricalLogs, startTimers, stopTimers, reset, clearCharts, clearLogs, setLogLevelFilter, setLogWorkerFilter
   }
 })
 

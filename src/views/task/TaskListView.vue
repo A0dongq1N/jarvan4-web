@@ -4,7 +4,7 @@
       :title="projectStore.currentProject ? `${projectStore.currentProject.name} · 压测任务` : '压测任务'"
       subtitle="管理和执行压测任务"
     >
-      <el-button type="primary" :icon="Plus" @click="openCreate">新建任务</el-button>
+      <el-button v-if="canEdit" type="primary" :icon="Plus" @click="openCreate">新建任务</el-button>
     </PageHeader>
 
     <!-- Search Bar -->
@@ -120,21 +120,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { notifyError, notifySuccess, notifyWarning, getErrorMessage } from '@/utils/feedback'
 import { useTaskStore } from '@/stores/task'
+import { useExecutionStore } from '@/stores/execution'
 import { useProjectStore } from '@/stores/project'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { formatTime } from '@/utils/format'
+import { can } from '@/utils/permissions'
+import { launchExecutionForTask } from '@/utils/executionLaunch'
+import { useAuthStore } from '@/stores/auth'
 import type { StressTask } from '@/types'
 
 const router = useRouter()
 const taskStore = useTaskStore()
+const executionStore = useExecutionStore()
 const projectStore = useProjectStore()
+const authStore = useAuthStore()
+const canEdit = computed(() => can(authStore.userInfo?.role, 'edit'))
 
 const searchKeyword = ref('')
 const statusFilter = ref('')
@@ -218,7 +225,10 @@ function goDetail(id: string) {
 }
 
 function goExecution(taskId: string) {
-  router.push(`/execution/${taskId}?autostart=1`)
+  void (async () => {
+    const actives = await executionStore.listActiveExecutions(taskId)
+    await launchExecutionForTask(router, taskId, actives)
+  })()
 }
 
 function confirmDelete(task: StressTask) {

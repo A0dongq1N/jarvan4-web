@@ -30,6 +30,11 @@ test.describe('Worker — 节点管理', () => {
     expect(typeof body.data.total).toBe('number')
     expect(body.data.page).toBe(1)
     expect(body.data.pageSize).toBe(20)
+    expect(typeof body.data.busyCount).toBe('number')
+    expect(typeof body.data.onlineCount).toBe('number')
+    expect(typeof body.data.offlineCount).toBe('number')
+    expect(typeof body.data.usedConcurrency).toBe('number')
+    expect(typeof body.data.totalConcurrency).toBe('number')
   })
 
   test('GET /api/workers 若有节点则字段结构符合前端契约', async ({ page }) => {

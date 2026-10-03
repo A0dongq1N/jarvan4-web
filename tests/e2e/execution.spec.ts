@@ -48,6 +48,30 @@ test.describe('Execution — 执行管理', () => {
     }
   })
 
+  test('POST /api/executions 同一任务可连续创建多条 pending', async ({ page }) => {
+    const { token, taskId } = await getTokenAndTaskId(page)
+
+    const resp1 = await page.request.post('/api/executions', {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { taskId },
+    })
+    const body1 = await resp1.json()
+    if (body1.code !== 0) {
+      test.skip()
+      return
+    }
+
+    const resp2 = await page.request.post('/api/executions', {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { taskId },
+    })
+    const body2 = await resp2.json()
+    expect(body2.code).toBe(0)
+    expect(body2.data.status).toBe('pending')
+    expect(body2.data.id).toBeTruthy()
+    expect(body2.data.id).not.toBe(body1.data.id)
+  })
+
   test('GET /api/tasks/:taskId/executions 历史列表结构正确', async ({ page }) => {
     const { token, taskId } = await getTokenAndTaskId(page)
 

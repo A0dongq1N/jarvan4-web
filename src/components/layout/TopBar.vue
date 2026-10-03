@@ -36,11 +36,12 @@
           <el-avatar :size="28" class="topbar__avatar">
             {{ userInitial }}
           </el-avatar>
-          <span class="topbar__username">{{ authStore.userInfo?.displayName || 'Admin' }}</span>
+          <span class="topbar__username">{{ authStore.userInfo?.username || authStore.userInfo?.displayName || '用户' }}</span>
           <el-icon :size="12" class="topbar__caret"><ArrowDown /></el-icon>
         </div>
         <template #dropdown>
           <el-dropdown-menu>
+            <el-dropdown-item command="account">用户信息</el-dropdown-item>
             <el-dropdown-item command="logout" :icon="SwitchButton">退出登录</el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -69,6 +70,10 @@ const userInitial = computed(() => {
 })
 
 function handleCommand(command: string) {
+  if (command === 'account') {
+    router.push('/account')
+    return
+  }
   if (command === 'logout') {
     authStore.logout()
     router.push('/login')

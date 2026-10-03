@@ -63,6 +63,18 @@ const router = createRouter({
           meta: { title: '报告详情' },
         },
         {
+          path: 'account',
+          name: 'Account',
+          component: () => import('@/views/account/AccountView.vue'),
+          meta: { title: '用户信息' },
+        },
+        {
+          path: 'users',
+          name: 'UserAdmin',
+          component: () => import('@/views/user/UserAdminView.vue'),
+          meta: { title: '用户管理' },
+        },
+        {
           path: 'worker',
           name: 'WorkerList',
           component: () => import('@/views/worker/WorkerListView.vue'),
@@ -110,7 +122,15 @@ router.beforeEach((to, _from, next) => {
   }
 
   // 已登录访问 AppLayout 子路由：节点管理、审计日志不需要选择项目
-  if (to.path.startsWith('/worker') || to.path.startsWith('/audit')) {
+  if (to.path.startsWith('/worker') || to.path.startsWith('/audit') || to.path.startsWith('/account') || to.path.startsWith('/users')) {
+    if (to.path.startsWith('/users')) {
+      const raw = localStorage.getItem('stress_userinfo')
+      const role = raw ? JSON.parse(raw)?.role : ''
+      if (role !== 'admin') {
+        next('/account')
+        return
+      }
+    }
     next()
     return
   }
