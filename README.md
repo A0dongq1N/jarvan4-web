@@ -55,7 +55,12 @@ npm run dev
 局域网访问：
 
 ```bash
-npm run dev -- --host
+# 为什么 VITE_USE_MOCK 默认是 true？在哪配置的？
+# 
+# - 默认开发模式（`npm run dev` 或 `npm run dev -- --host`）下，VITE_USE_MOCK 自动为 true，不传就是走 mock 数据，仅前端可用。
+# - 配置方式：见 `package.json` 中的 `scripts`，未显式传入 VITE_USE_MOCK 时，Vite 会把未定义的 env 变量标为 undefined，代码里会 `|| true` 兜底（参见 `src/main.ts`）。
+# - 如需关闭 Mock、直连后端，需手动加 `VITE_USE_MOCK=false`。
+VITE_USE_MOCK=false npm run dev -- --host
 ```
 
 ## 完整启动（前端 + 后端）
