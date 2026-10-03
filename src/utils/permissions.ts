@@ -11,6 +11,7 @@ const CATALOG: { key: string; label: string }[] = [
   { key: 'edit', label: '创建和修改项目、任务' },
   { key: 'run', label: '绑定脚本、部署、开始和停止压测' },
   { key: 'offline', label: '下线节点' },
+  { key: 'upgrade', label: '升级节点' },
   { key: 'scheduling', label: '修改全局调度配额' },
   { key: 'users', label: '管理用户、审批权限申请' },
 ]
@@ -30,6 +31,7 @@ export function permissionItems(role?: string | null): PermissionItem[] {
   }
   if (current === 'admin') {
     allow.add('offline')
+    allow.add('upgrade')
     allow.add('scheduling')
     allow.add('users')
   }

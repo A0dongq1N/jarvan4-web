@@ -66,16 +66,27 @@
         <el-radio-button value="online">空闲</el-radio-button>
         <el-radio-button value="offline">离线</el-radio-button>
       </el-radio-group>
+      <el-button v-if="canUpgrade" @click="selectUpgradable">选中可升级</el-button>
     </div>
 
     <!-- 节点列表 -->
     <div class="table-card">
+      <div v-if="canUpgrade && selected.length" class="upgrade-bar">
+        <span>已选 {{ selected.length }} 台节点</span>
+        <el-button type="primary" :loading="upgrading" @click="upgradeSelected">
+          升级到最新版本 {{ latestDeployVersion || '…' }}
+        </el-button>
+        <el-button @click="clearSelection">取消选择</el-button>
+      </div>
       <el-table
+        ref="tableRef"
         :data="workers"
         row-key="id"
         class="worker-table"
         :row-class-name="rowClassName"
+        @selection-change="onSelectionChange"
       >
+        <el-table-column type="selection" width="48" reserve-selection :selectable="canSelectUpgrade" />
         <el-table-column label="主机名" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="cell-mono">{{ row.hostname }}</span>
@@ -147,9 +158,22 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="版本" min-width="148">
+          <template #default="{ row }">
+            <span class="version-cell">
+              <span class="cell-mono">{{ row.deployVersion || '—' }}</span>
+              <el-tag
+                v-if="versionTag(row)"
+                size="small"
+                effect="light"
+                :type="versionTag(row)?.type"
+              >{{ versionTag(row)?.label }}</el-tag>
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column label="规格" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            <span>{{ row.cpuCores }} 核 / {{ row.memTotalGb }} GB</span>
+            <span>{{ row.cpuCores }} 核 / {{ Math.round(row.memTotalGb) }} GB</span>
           </template>
         </el-table-column>
         <el-table-column label="心跳" width="100">
@@ -157,8 +181,15 @@
             <span class="cell-muted">{{ formatHeartbeatAgo(heartbeatDisplaySec(row)) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right" align="center">
+        <el-table-column label="操作" width="148" fixed="right" align="center">
           <template #default="{ row }">
+            <el-button
+              v-if="isUpgradable(row)"
+              size="small"
+              type="primary"
+              plain
+              @click="upgradeRows([row])"
+            >升级</el-button>
             <el-button
               v-if="row.status !== 'offline' && canOffline"
               size="small"
@@ -166,7 +197,7 @@
               plain
               @click="offlineWorker(row)"
             >下线</el-button>
-            <span v-else class="cell-muted">—</span>
+            <span v-if="!isUpgradable(row) && (row.status === 'offline' || !canOffline)" class="cell-muted">—</span>
           </template>
         </el-table-column>
         <template #empty>
@@ -184,6 +215,19 @@
         />
       </div>
     </div>
+
+    <el-dialog v-model="upgradeVisible" title="节点升级" width="640px" @closed="stopUpgradePoll">
+      <p class="upgrade-target">
+        目标版本 {{ upgradeTarget || '—' }}
+      </p>
+      <el-table :data="upgradeResults" size="small">
+        <el-table-column prop="hostname" label="节点" min-width="160" />
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">{{ upgradeStatusLabel(row.status) }}</template>
+        </el-table-column>
+        <el-table-column prop="message" label="说明" min-width="220" show-overflow-tooltip />
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -197,13 +241,29 @@ import { formatHeartbeatAgo } from '@/utils/format'
 import { can } from '@/utils/permissions'
 import { useAuthStore } from '@/stores/auth'
 import type { WorkerListData, WorkerNode, WorkerStatus } from '@/types'
+
+interface UpgradeResult {
+  workerId: string
+  hostname: string
+  status: string
+  message: string
+}
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
 const workers = ref<WorkerNode[]>([])
+const tableRef = ref()
+const latestDeployVersion = ref('')
 const authStore = useAuthStore()
 const canScheduling = computed(() => can(authStore.userInfo?.role, 'scheduling'))
 const canOffline = computed(() => can(authStore.userInfo?.role, 'offline'))
+const canUpgrade = computed(() => can(authStore.userInfo?.role, 'upgrade'))
+const selected = ref<WorkerNode[]>([])
+const upgrading = ref(false)
+const upgradeVisible = ref(false)
+const upgradeResults = ref<UpgradeResult[]>([])
+const upgradeTarget = ref('')
+let upgradePoll = 0
 const loading = ref(false)
 const maxRpsPerWorker = ref(2000)
 const rpsPerCore = ref(300)
@@ -282,6 +342,7 @@ async function load(opts?: { silent?: boolean }) {
     if (queryKeyword.value) params.keyword = queryKeyword.value
     const res = await request.get('/workers', { params })
     const data = res.data.data as WorkerListData
+    latestDeployVersion.value = data.latestDeployVersion || ''
     workers.value = applyStickyMetrics(data.list ?? [])
     total.value = data.total ?? 0
     stats.value = {
@@ -416,6 +477,7 @@ function startTimers() {
 }
 
 function stopTimers() {
+  stopUpgradePoll()
   if (timer) {
     clearInterval(timer)
     timer = null
@@ -425,6 +487,108 @@ function stopTimers() {
     tickTimer = null
   }
   clearSearchTimer()
+}
+
+function canSelectUpgrade(row: WorkerNode) {
+  return canUpgrade.value && row.status === 'online'
+}
+
+function onSelectionChange(rows: WorkerNode[]) {
+  selected.value = rows
+}
+
+function versionTag(row: WorkerNode): { label: string; type: 'success' | 'warning' | 'info' } | null {
+  if (!row.deployVersion) return { label: '需手动安装', type: 'info' }
+  if (!latestDeployVersion.value) return null
+  if (row.deployVersion === latestDeployVersion.value) return { label: '最新', type: 'success' }
+  return { label: '可升级', type: 'warning' }
+}
+
+function isUpgradable(row: WorkerNode) {
+  return canUpgrade.value && row.status === 'online' && !!row.deployVersion
+    && !!latestDeployVersion.value && row.deployVersion !== latestDeployVersion.value
+}
+
+function selectUpgradable() {
+  tableRef.value?.clearSelection()
+  for (const row of workers.value) {
+    if (isUpgradable(row)) tableRef.value?.toggleRowSelection(row, true)
+  }
+}
+
+function clearSelection() {
+  tableRef.value?.clearSelection()
+}
+
+function upgradeStatusLabel(status: string) {
+  switch (status) {
+    case 'accepted': return '升级中'
+    case 'succeeded': return '成功'
+    case 'failed': return '失败'
+    case 'latest': return '已是当前版本'
+    case 'skipped': return '已跳过'
+    default: return status || '—'
+  }
+}
+
+function stopUpgradePoll() {
+  if (upgradePoll) {
+    window.clearTimeout(upgradePoll)
+    upgradePoll = 0
+  }
+}
+
+function upgradeSelected() {
+  return upgradeRows(selected.value)
+}
+
+async function upgradeRows(rows: WorkerNode[]) {
+  if (!rows.length) return
+  const version = latestDeployVersion.value || '最新版本'
+  const ok = await confirmDanger(
+    `将把 ${rows.length} 台节点的 Worker 程序和配置更新到 ${version}。节点会短暂重启，正在压测的节点会自动跳过。`,
+    { title: '升级 Worker', confirmText: '开始升级' },
+  )
+  if (!ok) return
+  upgrading.value = true
+  try {
+    const res = await request.post('/workers/upgrade', {
+      workerIds: rows.map(w => w.workerId),
+    })
+    const data = res.data.data as {
+      batchId: string
+      deployVersion: string
+      results: UpgradeResult[]
+    }
+    upgradeTarget.value = data.deployVersion || ''
+    upgradeResults.value = data.results || []
+    upgradeVisible.value = true
+    pollUpgrade(data.batchId, Date.now() + 90_000)
+    load()
+  } catch (e) {
+    notifyError(getErrorMessage(e), '升级失败')
+  } finally {
+    upgrading.value = false
+  }
+}
+
+function pollUpgrade(batchId: string, deadline: number) {
+  stopUpgradePoll()
+  const tick = async () => {
+    if (!upgradeVisible.value || Date.now() > deadline) return
+    if (!upgradeResults.value.some(r => r.status === 'accepted')) return
+    try {
+      const res = await request.get(`/workers/upgrades/${batchId}`)
+      const data = res.data.data as { results: UpgradeResult[] }
+      if (data?.results) upgradeResults.value = data.results
+    } catch {
+      // 下一轮再查
+    }
+    if (upgradeVisible.value && upgradeResults.value.some(r => r.status === 'accepted') && Date.now() < deadline) {
+      upgradePoll = window.setTimeout(tick, 2000)
+    }
+  }
+  upgradePoll = window.setTimeout(tick, 2000)
 }
 
 async function offlineWorker(w: WorkerNode) {
@@ -565,6 +729,20 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
+.upgrade-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid $border-color-light;
+}
+
+.version-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .table-card {
   background: $bg-card;
   border-radius: $border-radius;
@@ -609,6 +787,13 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   font-size: 13px;
   color: $text-regular;
+}
+
+.upgrade-target {
+  margin: 0 0 12px;
+  color: var(--el-text-color-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
 }
 
 .cell-sub {

@@ -42,6 +42,42 @@ export const workerHandlers: MockHandler[] = [
   },
   {
     method: 'POST',
+    url: '/workers/upgrade',
+    handler: ({ body }) => {
+      const ids = ((body as { workerIds?: string[] } | null)?.workerIds) || []
+      const results = ids.map(id => {
+        const w = workers.find(item => item.workerId === id)
+        if (!w) return { workerId: id, hostname: id, status: 'failed', message: '节点不存在' }
+        if (w.status !== 'online') return { workerId: id, hostname: w.hostname, status: 'skipped', message: '节点不可升级' }
+        w.binarySha256 = 'abc123def456'
+        w.configRevision = 'cfg123def456'
+        return { workerId: id, hostname: w.hostname, status: 'succeeded', message: '' }
+      })
+      return ok({
+        batchId: 'mock-batch',
+        sha256: 'abc123def456',
+        configRevision: 'cfg123def456',
+        results,
+      })
+    },
+  },
+  {
+    method: 'GET',
+    url: '/workers/upgrades/:batchId',
+    handler: () => ok({
+      batchId: 'mock-batch',
+      sha256: 'abc123def456',
+      configRevision: 'cfg123def456',
+      results: workers.filter(w => w.status === 'online').map(w => ({
+        workerId: w.workerId,
+        hostname: w.hostname,
+        status: 'succeeded',
+        message: '',
+      })),
+    }),
+  },
+  {
+    method: 'POST',
     url: '/workers/:workerId/offline',
     handler: ({ params }) => {
       const w = workers.find(w => w.workerId === params.workerId)

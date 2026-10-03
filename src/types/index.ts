@@ -390,6 +390,9 @@ export interface WorkerNode {
   pluginAbiVersion?: number
   declaredMaxRps?: number
   effectiveMaxRps?: number
+  binarySha256?: string
+  configRevision?: string
+  deployVersion?: string
 }
 
 export interface WorkerListData extends PageResult<WorkerNode> {
@@ -398,6 +401,9 @@ export interface WorkerListData extends PageResult<WorkerNode> {
   offlineCount: number
   usedConcurrency: number
   totalConcurrency: number
+  latestBinarySha256?: string
+  latestConfigRevision?: string
+  latestDeployVersion?: string
 }
 
 // 项目
@@ -420,7 +426,7 @@ export type AuditAction =
   | 'create_script' | 'delete_script'
   | 'create_project' | 'delete_project'
   | 'create_user' | 'update_user' | 'delete_user'
-  | 'register_worker' | 'offline_worker'
+  | 'register_worker' | 'offline_worker' | 'upgrade_worker'
 
 export type AuditResourceType = 'task' | 'script' | 'execution' | 'project' | 'user' | 'worker' | 'system'
 
