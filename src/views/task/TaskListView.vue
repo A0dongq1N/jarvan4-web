@@ -125,17 +125,20 @@ import { useRouter } from 'vue-router'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { notifyError, notifySuccess, notifyWarning, getErrorMessage } from '@/utils/feedback'
 import { useTaskStore } from '@/stores/task'
+import { useExecutionStore } from '@/stores/execution'
 import { useProjectStore } from '@/stores/project'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { formatTime } from '@/utils/format'
 import { can } from '@/utils/permissions'
+import { launchExecutionForTask } from '@/utils/executionLaunch'
 import { useAuthStore } from '@/stores/auth'
 import type { StressTask } from '@/types'
 
 const router = useRouter()
 const taskStore = useTaskStore()
+const executionStore = useExecutionStore()
 const projectStore = useProjectStore()
 const authStore = useAuthStore()
 const canEdit = computed(() => can(authStore.userInfo?.role, 'edit'))
@@ -222,7 +225,10 @@ function goDetail(id: string) {
 }
 
 function goExecution(taskId: string) {
-  router.push(`/execution/${taskId}?autostart=1`)
+  void (async () => {
+    const actives = await executionStore.listActiveExecutions(taskId)
+    await launchExecutionForTask(router, taskId, actives)
+  })()
 }
 
 function confirmDelete(task: StressTask) {

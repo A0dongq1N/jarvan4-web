@@ -22,7 +22,9 @@
     >
       <template #title>
         当前有进行中的压测（{{ activeExecutionStatusLabel }}）
-        <el-button type="primary" link @click="goMonitor(activeExecution.id)">进入监控页</el-button>
+        <span v-if="activeExecutionCount > 1">等共 {{ activeExecutionCount }} 条</span>
+        <el-button type="primary" link @click="goMonitor(activeExecution!.id)">进入监控页</el-button>
+        <el-button type="primary" link @click="activeTab = 'history'">查看全部</el-button>
       </template>
     </el-alert>
 
@@ -537,6 +539,7 @@ import { can } from '@/utils/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { formatTime, formatDuration } from '@/utils/format'
 import { isActiveExecution, executionMonitorPath } from '@/utils/execution'
+import { launchExecutionForTask } from '@/utils/executionLaunch'
 import request from '@/utils/request'
 
 const route = useRoute()
@@ -571,6 +574,7 @@ const historyPage = ref(1)
 const historyPageSize = 10
 const historyLoading = ref(false)
 const activeExecution = ref<ExecutionRecord | null>(null)
+const activeExecutionCount = ref(0)
 
 const activeExecutionStatusLabel = computed(() => {
   if (!activeExecution.value) return ''
@@ -585,7 +589,9 @@ const activeExecutionStatusLabel = computed(() => {
 
 async function refreshActiveExecution() {
   if (isCreate.value) return
-  activeExecution.value = await executionStore.findActiveExecution(taskId.value)
+  const actives = await executionStore.listActiveExecutions(taskId.value)
+  activeExecutionCount.value = actives.length
+  activeExecution.value = actives[0] ?? null
 }
 
 async function loadHistory() {
@@ -597,8 +603,12 @@ async function loadHistory() {
     })
     historyList.value = res.data.data.list
     historyTotal.value = res.data.data.total
-    const active = historyList.value.find(r => isActiveExecution(r.status))
-    if (active) activeExecution.value = active
+    const actives = historyList.value.filter((r) => isActiveExecution(r.status))
+    activeExecutionCount.value = actives.length
+    if (actives.length) activeExecution.value = actives[0]!
+    else if (!activeExecution.value || !isActiveExecution(activeExecution.value.status)) {
+      activeExecution.value = null
+    }
   } finally {
     historyLoading.value = false
   }
@@ -611,7 +621,9 @@ watch(activeTab, (tab) => {
 
 // 按最近更新时间排序，始终与 store 保持同步
 const availableScripts = computed(() =>
-  [...scriptStore.list].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+  [...scriptStore.list]
+    .filter(s => s.commitHash)
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
 )
 
 const filteredScripts = computed(() => {
@@ -1051,7 +1063,10 @@ async function handleSave() {
 }
 
 function goExecution() {
-  router.push(`/execution/${taskId.value}?autostart=1`)
+  void (async () => {
+    const actives = await executionStore.listActiveExecutions(taskId.value)
+    await launchExecutionForTask(router, taskId.value, actives)
+  })()
 }
 
 function goMonitor(executionId: string) {

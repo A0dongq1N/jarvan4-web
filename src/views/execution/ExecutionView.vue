@@ -11,6 +11,22 @@
     <div class="execution-control">
       <div class="execution-control__info">
         <div class="execution-control__task-name">{{ taskName }}</div>
+        <div v-if="taskActiveRuns.length > 1" class="execution-control__run-switch">
+          <span class="execution-control__run-switch-label">进行中执行</span>
+          <el-select
+            :model-value="route.query.execId as string || executionStore.state?.id"
+            size="small"
+            style="width: 280px"
+            @change="switchExecution"
+          >
+            <el-option
+              v-for="run in taskActiveRuns"
+              :key="run.id"
+              :label="`${run.id.slice(0, 8)}… · ${run.status}`"
+              :value="run.id"
+            />
+          </el-select>
+        </div>
         <div class="execution-control__status">
           <StatusBadge :status="executionStatus" />
           <span v-if="executionStore.state && executionStatus === 'running'" class="execution-control__elapsed">
@@ -24,11 +40,18 @@
           先创建执行并勾选脚本，部署完成后再注入流量
         </p>
         <p v-else-if="executionStatus === 'pending'" class="execution-control__hint">
-          勾选本次要部署的脚本，确认后点击「开始部署」
+          勾选本次要部署的脚本，确认后点击「开始部署」。超过 15 分钟未部署将自动取消。
         </p>
       </div>
 
       <div class="execution-control__actions">
+        <el-button
+          v-if="canRun && showNewRunWhileActive"
+          size="large"
+          @click="startNewExecution"
+        >
+          再开一次压测
+        </el-button>
         <el-button
           v-if="canStartDeploy"
           type="primary"
@@ -153,7 +176,7 @@
     <div v-if="executionStatus === 'pending'" class="script-select-panel">
       <div class="script-select-panel__header">
         <span class="script-select-panel__title">选择要部署的脚本</span>
-        <span class="script-select-panel__hint">未勾选的脚本不会下发到 Worker，也不参与本次注入</span>
+        <span class="script-select-panel__hint">未勾选的脚本不会下发到 Worker，也不参与本次注入。超过 15 分钟未部署将自动取消。</span>
       </div>
       <el-checkbox
         :model-value="allScriptsSelected"
@@ -421,7 +444,7 @@ import { formatDeployError } from '@/utils/execution'
 import { can } from '@/utils/permissions'
 import { useAuthStore } from '@/stores/auth'
 import request from '@/utils/request'
-import type { TaskStatus, ScriptStatus, WorkerSnapshot, ExecutionState } from '@/types'
+import type { TaskStatus, ScriptStatus, WorkerSnapshot, ExecutionState, ExecutionRecord } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -436,6 +459,8 @@ const AUTO_INJECT_KEY = 'jarvan4_execution_auto_inject'
 const taskId = computed(() => route.params.taskId as string)
 const taskName = ref('加载中...')
 const taskScriptCount = ref(0)
+const taskActiveRuns = ref<ExecutionRecord[]>([])
+
 const deployBlockError = ref('')
 const injectBlockError = ref('')
 const selectedScriptIds = ref<string[]>([])
@@ -446,6 +471,55 @@ const logLevelFilter = computed({
 const autoInject = ref(localStorage.getItem(AUTO_INJECT_KEY) === 'true')
 
 const executionStatus = computed<TaskStatus>(() => executionStore.state?.status || 'idle')
+
+async function refreshTaskActiveRuns() {
+  try {
+    taskActiveRuns.value = await executionStore.listActiveExecutions(taskId.value)
+  } catch {
+    taskActiveRuns.value = []
+  }
+}
+
+const showNewRunWhileActive = computed(() =>
+  !!executionStore.state?.id
+  && (executionStatus.value === 'prepared' || executionStatus.value === 'running'),
+)
+
+async function switchExecution(execId: string) {
+  if (!execId || execId === executionStore.state?.id) return
+  executionStore.stopTimers()
+  await executionStore.resumeExecution(execId)
+  await router.replace({ path: route.path, query: { execId } })
+}
+
+async function startNewExecution() {
+  deployBlockError.value = ''
+  injectBlockError.value = ''
+  executionStore.stopTimers()
+  executionStore.reset()
+  selectedScriptIds.value = []
+  try {
+    const task = await taskStore.fetchById(taskId.value)
+    taskScriptCount.value = task.scripts?.length ?? 0
+    if (!taskScriptCount.value) {
+      const msg = '任务未绑定压测脚本，请先在任务详情 → 脚本绑定中添加脚本'
+      deployBlockError.value = msg
+      ElMessage.error(msg)
+      return
+    }
+    await executionStore.startExecution(taskId.value)
+    const id = executionStore.state?.id
+    if (id) {
+      await refreshTaskActiveRuns()
+      await router.replace({ path: route.path, query: { execId: id } })
+    }
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { message?: string } } }
+    const msg = err?.response?.data?.message || '启动压测失败'
+    deployBlockError.value = msg
+    ElMessage.error(msg)
+  }
+}
 
 const isTerminalExecution = computed(() =>
   ['success', 'stopped', 'circuit_broken', 'failed'].includes(executionStatus.value),
@@ -580,31 +654,55 @@ onMounted(async () => {
     taskName.value = '未知任务'
   }
 
+  await refreshTaskActiveRuns()
+
   const execId = route.query.execId as string | undefined
   const autostart = route.query.autostart === '1'
+  const newRun = route.query.newRun === '1'
 
   if (execId) {
-    // 刷新恢复：已有执行 ID，重连到正在运行的执行，不清空状态
     await executionStore.resumeExecution(execId)
-  } else {
-    const active = await executionStore.findActiveExecution(taskId.value)
-    if (active) {
-      await executionStore.resumeExecution(active.id)
-      router.replace({ path: route.path, query: { execId: active.id } })
-      if (autostart) {
-        ElMessage.info('已恢复进行中的压测')
-      }
-    } else {
-      executionStore.reset()
-      if (autostart) {
+    await refreshTaskActiveRuns()
+    return
+  }
+
+  if (newRun || autostart) {
+    executionStore.reset()
+    if (autostart || newRun) {
+      try {
         await executionStore.startExecution(taskId.value)
-        if (executionStore.state?.id) {
-          router.replace({ path: route.path, query: { execId: executionStore.state.id } })
+        const id = executionStore.state?.id
+        if (id) {
+          await refreshTaskActiveRuns()
+          await router.replace({ path: route.path, query: { execId: id } })
         }
+      } catch (e: unknown) {
+        const err = e as { response?: { data?: { message?: string } } }
+        ElMessage.error(err?.response?.data?.message || '启动压测失败')
       }
     }
+    return
   }
+
+  const active = await executionStore.findActiveExecution(taskId.value)
+  if (active) {
+    await executionStore.resumeExecution(active.id)
+    await router.replace({ path: route.path, query: { execId: active.id } })
+    return
+  }
+
+  executionStore.reset()
 })
+
+watch(
+  () => route.query.execId,
+  async (execId, prev) => {
+    if (!execId || execId === prev || execId === executionStore.state?.id) return
+    executionStore.stopTimers()
+    await executionStore.resumeExecution(execId as string)
+    await refreshTaskActiveRuns()
+  },
+)
 
 onUnmounted(() => {
   executionStore.stopTimers()
@@ -640,6 +738,10 @@ watch(executionStatus, async (status, prevStatus) => {
       ElMessage.warning(msg)
     } else if (prevStatus === 'prepared') {
       ElMessage.warning('等待超时，已自动取消')
+    } else if (prevStatus === 'pending' && msg) {
+      ElMessage.warning(msg)
+    } else if (prevStatus === 'pending') {
+      ElMessage.warning('等待超时，已自动取消')
     } else {
       ElMessage.warning('流量注入已停止')
     }
@@ -648,6 +750,9 @@ watch(executionStatus, async (status, prevStatus) => {
     ElMessage.error(formatDeployError(raw).title)
   } else if (status === 'circuit_broken') {
     ElMessage.error(executionStore.state?.errorMsg || '熔断保护已触发，压测已自动停止')
+  }
+  if (['pending', 'preparing', 'prepared', 'running', 'success', 'stopped', 'failed', 'circuit_broken'].includes(status)) {
+    await refreshTaskActiveRuns()
   }
 })
 
@@ -842,6 +947,19 @@ const scriptDeploySummaryClass = computed(() => {
     font-weight: 600;
     color: $text-primary;
     margin-bottom: 6px;
+  }
+
+  &__run-switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  &__run-switch-label {
+    font-size: 13px;
+    color: $text-secondary;
+    flex-shrink: 0;
   }
 
   &__status {
