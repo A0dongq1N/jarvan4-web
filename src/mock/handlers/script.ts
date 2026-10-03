@@ -72,7 +72,7 @@ export const scriptHandlers: MockHandler[] = [
         }
         // 插入版本历史
         if (!mockVersionHistory[existing.id]) mockVersionHistory[existing.id] = []
-        mockVersionHistory[existing.id].unshift({ commitHash: data.commitHash, artifactUrl: data.artifactUrl, commitMsg: data.commitMsg, author: data.author, createdAt: now })
+        mockVersionHistory[existing.id].unshift({ commitHash: data.commitHash, artifactUrl: data.artifactUrl, commitMsg: data.commitMsg, author: data.author, branch: 'main', channel: 'release', createdAt: now })
         return ok(scripts[idx])
       } else {
         const newScript: Script = {
@@ -90,7 +90,7 @@ export const scriptHandlers: MockHandler[] = [
           updatedAt: now,
         }
         scripts.unshift(newScript)
-        mockVersionHistory[newScript.id] = [{ commitHash: data.commitHash, artifactUrl: data.artifactUrl, commitMsg: data.commitMsg, author: data.author, createdAt: now }]
+        mockVersionHistory[newScript.id] = [{ commitHash: data.commitHash, artifactUrl: data.artifactUrl, commitMsg: data.commitMsg, author: data.author, branch: 'main', channel: 'release', createdAt: now }]
         return ok(newScript)
       }
     },

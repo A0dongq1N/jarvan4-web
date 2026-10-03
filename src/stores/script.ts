@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Script, ScriptVersion } from '@/types'
+import type { Script, ScriptPublication, ScriptVersion } from '@/types'
 import request from '@/utils/request'
 
 export const useScriptStore = defineStore('script', () => {
   const list = ref<Script[]>([])
   const total = ref(0)
+  const publications = ref<ScriptPublication[]>([])
+  const publicationTotal = ref(0)
   const versionHistory = ref<ScriptVersion[]>([])
   const versionTotal = ref(0)
   const loading = ref(false)
@@ -21,10 +23,19 @@ export const useScriptStore = defineStore('script', () => {
     }
   }
 
+  async function fetchPublications(params?: { page?: number; pageSize?: number; keyword?: string; channel?: string }) {
+    loading.value = true
+    try {
+      const res = await request.get('/script-versions', { params })
+      publications.value = res.data.data.list || []
+      publicationTotal.value = res.data.data.total
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function deleteScript(id: string) {
     await request.delete(`/scripts/${id}`)
-    list.value = list.value.filter(s => s.id !== id)
-    total.value--
   }
 
   async function fetchVersionHistory(id: string, params?: { page?: number; pageSize?: number }) {
@@ -35,7 +46,7 @@ export const useScriptStore = defineStore('script', () => {
   }
 
   return {
-    list, total, versionHistory, versionTotal, loading,
-    fetchList, deleteScript, fetchVersionHistory,
+    list, total, publications, publicationTotal, versionHistory, versionTotal, loading,
+    fetchList, fetchPublications, deleteScript, fetchVersionHistory,
   }
 })

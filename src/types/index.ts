@@ -186,7 +186,7 @@ export interface Script {
   // 源码仓库信息（CI 发布时透传），用于在前端展示"查看源码"链接
   // 链接 URL 规则：`${sourceRepo}/-/blob/main/${sourcePath}`（适配 cnb.cool / GitHub 等）
   sourceRepo?: string      // 仓库地址，如 https://cnb.cool/group/repo
-  sourcePath?: string      // 脚本在仓库中的相对路径，如 scripts/http_login/main.go
+  sourcePath?: string      // 脚本在仓库中的相对路径，如 scripts/http_auth_login_me/main.go
   updatedAt: string
   createdAt: string
 }
@@ -196,6 +196,24 @@ export interface ScriptVersion {
   artifactUrl: string
   commitMsg: string
   author: string
+  branch?: string
+  channel?: 'preview' | 'release' | string
+  createdAt: string
+}
+
+// 一次发布记录（预览或正式）
+export interface ScriptPublication {
+  id: string
+  scriptId: string
+  scriptName: string
+  commitHash: string
+  artifactUrl: string
+  commitMsg: string
+  author: string
+  branch: string
+  channel: 'preview' | 'release' | string
+  sourceRepo?: string
+  sourcePath?: string
   createdAt: string
 }
 

@@ -122,7 +122,7 @@ export const mockReports: Report[] = [
     ],
     createdAt: '2026-03-13T09:05:35Z',
     scriptSnapshots: [
-      { scriptId: 'script001', scriptName: 'http_login', commitHash: 'a3f8c1d2e4b5', weight: 100 },
+      { scriptId: 'script001', scriptName: 'http_auth_login_me', commitHash: 'a3f8c1d2e4b5', weight: 100 },
     ],
     workerSnapshots: [
       { workerId: 'worker-node-04', hostname: 'stress-worker-04', ip: '10.0.1.14', cpuCores: 8, memTotalGb: 16, maxConcurrency: 2000 },
@@ -207,7 +207,7 @@ export const mockReports: Report[] = [
     createdAt: '2026-03-19T09:03:05Z',
     scriptSnapshots: [
       { scriptId: 'script002', scriptName: 'http_search', commitHash: 'b7e9f2a1c3d6', weight: 60 },
-      { scriptId: 'script001', scriptName: 'http_login', commitHash: 'a3f8c1d2e4b5', weight: 40 },
+      { scriptId: 'script001', scriptName: 'http_auth_login_me', commitHash: 'a3f8c1d2e4b5', weight: 40 },
     ],
     workerSnapshots: [
       { workerId: 'worker-node-04', hostname: 'stress-worker-04', ip: '10.0.1.14', cpuCores: 8, memTotalGb: 16, maxConcurrency: 2000 },
